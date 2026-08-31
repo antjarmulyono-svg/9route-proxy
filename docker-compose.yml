@@ -1,0 +1,40 @@
+services:
+  9router:
+    build: .
+    image: 9router:local
+    container_name: 9router
+    restart: always
+    ports:
+      - "20128:20128"
+      - "443:443"
+    volumes:
+      - 9router-data:/app/data
+    env_file:
+      - .env
+    environment:
+      # MITM binds :443 and rewrites /etc/hosts — both need root, so skip the
+      # su-exec drop to the `node` user. Only set this when MITM is in use.
+      RUN_AS_ROOT: "1"
+      # With DNS interception on, the router's own upstream calls resolve to the MITM.
+      # Node ignores the system CA store, so point it at the MITM root CA explicitly.
+      # Absent on a fresh volume until MITM first starts — Node warns, then works after
+      # the next restart.
+      NODE_EXTRA_CA_CERTS: /app/data/mitm/rootCA.crt
+      DATA_DIR: /app/data
+      PORT: "20128"
+      HOSTNAME: "0.0.0.0"
+      NODE_ENV: production
+      HEADROOM_URL: http://headroom:8787
+    depends_on:
+      - headroom
+
+  headroom:
+    image: ghcr.io/chopratejas/headroom:latest
+    container_name: headroom
+    restart: always
+    ports:
+      - "8787:8787"
+
+volumes:
+  9router-data:
+    name: 9router-data
