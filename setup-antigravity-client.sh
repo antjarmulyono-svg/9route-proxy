@@ -1,37 +1,54 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # 9Router Antigravity Remote Client Setup Script
-# Target Client: 10.10.123.147 (dev-meninjar)
-# 9Router Server: 10.10.123.206 (MITM Proxy on Port 443 & API on Port 20128)
+# Configures any client machine to route Antigravity IDE traffic to 9Router MITM
+# Usage:
+#   bash setup-antigravity-client.sh [9ROUTER_IP_OR_DOMAIN]
+#   ROUTER_IP=10.10.123.206 bash setup-antigravity-client.sh
 # ==============================================================================
 
 set -e
 
-ROUTER_IP="10.10.123.206"
+# 1. Resolve 9Router Server Host/IP (CLI Argument > Environment Variable > Interactive Prompt)
+ROUTER_IP="${1:-${ROUTER_IP:-}}"
+
+if [ -z "$ROUTER_IP" ]; then
+  read -r -p "Masukkan IP / Host Server 9Router (contoh: 10.10.123.206): " ROUTER_IP
+fi
+
+if [ -z "$ROUTER_IP" ]; then
+  echo "❌ Error: IP atau domain server 9Router wajib diisi."
+  exit 1
+fi
+
+ROUTER_PORT="${ROUTER_PORT:-20128}"
 HOSTS_FILE="/etc/hosts"
 CA_DIR="/usr/local/share/ca-certificates"
 CERT_FILE="${CA_DIR}/9router-root-ca.crt"
 
-# Determine sudo invocation
+# 2. Determine sudo invocation safely without hardcoded credentials
 if [ "$EUID" -eq 0 ]; then
   SUDO=""
 else
-  SUDO="echo zahwa2904 | sudo -S"
+  if ! command -v sudo >/dev/null 2>&1; then
+    echo "❌ Error: 'sudo' tidak ditemukan. Jalankan script ini sebagai root atau install sudo."
+    exit 1
+  fi
+  SUDO="sudo"
 fi
 
 echo "======================================================================"
 echo "🚀 Running 1-Click Setup for Antigravity Remote Client"
+echo "🌐 9Router Server Target: ${ROUTER_IP}"
 echo "======================================================================"
 
-# 1. Ping Check
+# 3. Connectivity check
 echo "🔍 [1/5] Testing connection to 9Router server (${ROUTER_IP})..."
 if ! ping -c 1 -W 2 "$ROUTER_IP" >/dev/null 2>&1; then
-  echo "❌ Error: Cannot reach 9Router server at ${ROUTER_IP}"
-  exit 1
+  echo "⚠️ Warning: Ping ke ${ROUTER_IP} tidak merespons (mungkin diblokir ICMP). Melanjutkan pengujian HTTP..."
 fi
-echo "✅ 9Router server ${ROUTER_IP} is reachable."
 
-# 2. Update /etc/hosts
+# 4. Update /etc/hosts
 echo "🌐 [2/5] Updating ${HOSTS_FILE} for Antigravity Google domains..."
 DOMAINS=(
   "daily-cloudcode-pa.googleapis.com"
@@ -39,16 +56,29 @@ DOMAINS=(
 )
 
 for domain in "${DOMAINS[@]}"; do
-  eval "$SUDO sed -i '/$domain/d' '$HOSTS_FILE'" || true
-  echo "${ROUTER_IP} ${domain}" | eval "$SUDO tee -a '$HOSTS_FILE'" >/dev/null
+  $SUDO sed -i "/[[:space:]]${domain}/d" "$HOSTS_FILE" 2>/dev/null || true
+  echo "${ROUTER_IP} ${domain}" | $SUDO tee -a "$HOSTS_FILE" >/dev/null
 done
-echo "✅ /etc/hosts updated."
+echo "✅ ${HOSTS_FILE} updated."
 
-# 3. Install 9Router Root CA Certificate
+# 5. Install 9Router Root CA Certificate
 echo "🔐 [3/5] Installing 9Router Root CA certificate..."
-eval "$SUDO mkdir -p '$CA_DIR'"
+$SUDO mkdir -p "$CA_DIR"
 
-cat << 'CERT_EOF' | eval "$SUDO tee '$CERT_FILE'" >/dev/null
+# Try downloading dynamic CA from 9Router server first, fallback to standard embedded CA
+DOWNLOAD_SUCCESS=false
+if curl -fsSL "http://${ROUTER_IP}:${ROUTER_PORT}/api/mitm/ca.crt" -o /tmp/9router-ca-temp.crt 2>/dev/null; then
+  if [ -s /tmp/9router-ca-temp.crt ]; then
+    $SUDO cp /tmp/9router-ca-temp.crt "$CERT_FILE"
+    rm -f /tmp/9router-ca-temp.crt
+    DOWNLOAD_SUCCESS=true
+    echo "✅ Root CA certificate downloaded from http://${ROUTER_IP}:${ROUTER_PORT}/api/mitm/ca.crt."
+  fi
+fi
+
+if [ "$DOWNLOAD_SUCCESS" = false ]; then
+  echo "ℹ️ Downloading failed or offline, writing default 9Router Root CA..."
+  cat << 'CERT_EOF' | $SUDO tee "$CERT_FILE" >/dev/null
 -----BEGIN CERTIFICATE-----
 MIIDOTCCAiGgAwIBAgIBATANBgkqhkiG9w0BAQsFADA+MR0wGwYDVQQDExQ5Um91
 dGVyIE1JVE0gUm9vdCBDQTEQMA4GA1UEChMHOVJvdXRlcjELMAkGA1UEBhMCVVMw
@@ -70,39 +100,44 @@ q7S2ikvbOs5jBjMaekKcWegXXPe2JWwqe5aJRTDTDTbDlfvR2BxgPE9tu1zaxWSz
 EA05CKSyG6Ey9xkFRA==
 -----END CERTIFICATE-----
 CERT_EOF
-
-eval "$SUDO chmod 644 '$CERT_FILE'"
-if command -v update-ca-certificates >/dev/null 2>&1; then
-  eval "$SUDO update-ca-certificates"
 fi
-# Direct append to ensure Go and C runtimes trust it immediately
+
+$SUDO chmod 644 "$CERT_FILE"
+
+# Update CA certificates bundle
+if command -v update-ca-certificates >/dev/null 2>&1; then
+  $SUDO update-ca-certificates
+fi
+
+# Append directly for Go / Node runtimes
 if [ -f /etc/ssl/certs/ca-certificates.crt ]; then
-  eval "$SUDO sh -c 'cat \"$CERT_FILE\" >> /etc/ssl/certs/ca-certificates.crt'"
+  $SUDO sh -c "cat '$CERT_FILE' >> /etc/ssl/certs/ca-certificates.crt" 2>/dev/null || true
 fi
 echo "✅ System Root CA trust store updated."
 
-# 4. Set Environment Variables & Restart Language Server
+# 6. Set Environment Variables & Reload Language Server
 echo "⚙️ [4/5] Exporting NODE_EXTRA_CA_CERTS and reloading backend..."
 pkill -f language_server_linux_x64 >/dev/null 2>&1 || true
+
 ENV_VAR="export NODE_EXTRA_CA_CERTS=\"${CERT_FILE}\""
-if ! grep -q "NODE_EXTRA_CA_CERTS" "$HOME/.bashrc" 2>/dev/null; then
+if [ -f "$HOME/.bashrc" ] && ! grep -q "NODE_EXTRA_CA_CERTS" "$HOME/.bashrc" 2>/dev/null; then
   echo "$ENV_VAR" >> "$HOME/.bashrc"
 fi
-if ! grep -q "NODE_EXTRA_CA_CERTS" /etc/environment 2>/dev/null; then
-  echo "NODE_EXTRA_CA_CERTS=\"${CERT_FILE}\"" | eval "$SUDO tee -a /etc/environment" >/dev/null
+if [ -f /etc/environment ] && ! grep -q "NODE_EXTRA_CA_CERTS" /etc/environment 2>/dev/null; then
+  echo "NODE_EXTRA_CA_CERTS=\"${CERT_FILE}\"" | $SUDO tee -a /etc/environment >/dev/null
 fi
 echo "✅ Environment variables configured."
 
-# 5. Verification Test
+# 7. Verification Test
 echo "🧪 [5/5] Testing DNS and Certificate Trust..."
-RESOLVED=$(getent ahostsv4 cloudcode-pa.googleapis.com | head -n 1 | awk '{print $1}')
+RESOLVED=$(getent ahostsv4 cloudcode-pa.googleapis.com 2>/dev/null | head -n 1 | awk '{print $1}')
 echo "  - DNS Resolution (v4): cloudcode-pa.googleapis.com -> ${RESOLVED}"
 if [ "$RESOLVED" = "$ROUTER_IP" ]; then
   echo "  ✅ DNS redirect confirmed OK."
 else
-  echo "  ⚠️ Warning: DNS resolved to ${RESOLVED}"
+  echo "  ⚠️ Note: DNS resolved to ${RESOLVED} (Check if /etc/hosts is active)."
 fi
 
 echo "======================================================================"
-echo "🎉 1-CLICK SETUP COMPLETED SUCCESSFULLY ON $(hostname)!"
+echo "🎉 SETUP COMPLETED SUCCESSFULLY ON $(hostname)!"
 echo "======================================================================"
