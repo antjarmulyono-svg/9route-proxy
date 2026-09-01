@@ -121,10 +121,25 @@ export function normalizeClaudePassthrough(body, model = "") {
     body.thinking = { type: "enabled", budget_tokens: 10000 };
   }
 
-  // 2. Strip effort param for models that don't support it (keep other output_config fields)
-  if (ADAPTIVE_THINKING_UNSUPPORTED.test(model) && body.output_config?.effort != null) {
-    delete body.output_config.effort;
-    if (Object.keys(body.output_config).length === 0) delete body.output_config;
+  // 2. Validate/strip effort param
+  if (body.output_config?.effort != null) {
+    const rawEffort = String(body.output_config.effort).toLowerCase();
+    if (ADAPTIVE_THINKING_UNSUPPORTED.test(model) || rawEffort === "auto" || rawEffort === "none") {
+      delete body.output_config.effort;
+      if (Object.keys(body.output_config).length === 0) delete body.output_config;
+    } else if (rawEffort === "minimal") {
+      body.output_config.effort = "low";
+    } else if (rawEffort === "ultra") {
+      body.output_config.effort = "max";
+    } else if (!["low", "medium", "high", "xhigh", "max"].includes(rawEffort)) {
+      delete body.output_config.effort;
+      if (Object.keys(body.output_config).length === 0) delete body.output_config;
+    }
+  }
+
+  // 3. Ensure thinking.enabled has budget_tokens >= 1024
+  if (body.thinking?.type === "enabled" && (!body.thinking.budget_tokens || body.thinking.budget_tokens < 1024)) {
+    body.thinking.budget_tokens = 8192;
   }
 
   // 2. Fold mid-conversation system messages into the neighbouring turn.
@@ -265,6 +280,27 @@ export function prepareClaudeRequest(body, provider = null, apiKey = null, conne
   // quirk: MiniMax's Claude-compatible endpoint rejects Anthropic's output_config (400 invalid params)
   if (PROVIDERS[provider]?.quirks?.dropOutputConfig) {
     delete body.output_config;
+  }
+
+  // Validate output_config.effort against Anthropic schema
+  if (body.output_config?.effort != null) {
+    const rawEffort = String(body.output_config.effort).toLowerCase();
+    if (rawEffort === "auto" || rawEffort === "none") {
+      delete body.output_config.effort;
+      if (Object.keys(body.output_config).length === 0) delete body.output_config;
+    } else if (rawEffort === "minimal") {
+      body.output_config.effort = "low";
+    } else if (rawEffort === "ultra") {
+      body.output_config.effort = "max";
+    } else if (!["low", "medium", "high", "xhigh", "max"].includes(rawEffort)) {
+      delete body.output_config.effort;
+      if (Object.keys(body.output_config).length === 0) delete body.output_config;
+    }
+  }
+
+  // Ensure thinking.enabled has budget_tokens >= 1024
+  if (body.thinking?.type === "enabled" && (!body.thinking.budget_tokens || body.thinking.budget_tokens < 1024)) {
+    body.thinking.budget_tokens = 8192;
   }
 
   // Clamp max_tokens to the model's real output ceiling. Models whose caps

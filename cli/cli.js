@@ -67,11 +67,23 @@ const { ensureSqliteRuntime, buildEnvWithRuntime } = require("./hooks/sqliteRunt
 const { ensureTrayRuntime } = require("./hooks/trayRuntime");
 const args = process.argv.slice(2);
 
-// Subcommands (`9router xai video …`) run against an already-running gateway
+// Subcommands (`9router xai video …`, `9router gemini video …`) run against an already-running gateway
 // and bypass the launcher flow (no runtime self-heal, no server spawn).
 if (args[0] === "xai" && args[1] === "video") {
   const { run } = require("./src/cli/commands/xaiVideo");
   run(args.slice(2))
+    .then((code) => process.exit(code))
+    .catch((err) => {
+      console.error(`❌ ${err?.message || err}`);
+      process.exit(1);
+    });
+  return;
+}
+
+// `gemini video …` / `google video …`, plus the `veo …` shorthand.
+if ((args[0] === "gemini" || args[0] === "google" || args[0] === "veo") && (args[1] === "video" || args[0] === "veo")) {
+  const { run } = require("./src/cli/commands/geminiVideo");
+  run(args.slice(args[1] === "video" ? 2 : 1))
     .then((code) => process.exit(code))
     .catch((err) => {
       console.error(`❌ ${err?.message || err}`);
@@ -157,6 +169,9 @@ Commands:
   xai video --prompt "..." --output video.mp4
                       Generate a Grok Imagine video via the running gateway
                       (see: ${APP_NAME} xai video --help)
+  gemini video --prompt "..." --output video.mp4
+                      Generate a Google Veo video via the running gateway
+                      (see: ${APP_NAME} gemini video --help)
 `);
     process.exit(0);
   } else if (args[i] === "--version" || args[i] === "-v") {

@@ -244,13 +244,24 @@ function applyFormat(fmt, body, cfg, caps, supportedLevels) {
       // Sonnet 5. Send both fields — the documented adaptive-thinking shape.
       body.thinking = { type: "adaptive" };
       const level = toLevel(eff);
-      body.output_config = { effort: level === "xhigh" ? "high" : level };
+      // Anthropic output_config.effort strictly accepts 'low', 'medium', 'high', 'xhigh', 'max'.
+      // 'auto' means purely adaptive thinking — do not send output_config.effort.
+      if (level && level !== "auto") {
+        let normEffort = level;
+        if (normEffort === "minimal") normEffort = "low";
+        else if (normEffort === "ultra") normEffort = "max";
+        if (["low", "medium", "high", "xhigh", "max"].includes(normEffort)) {
+          body.output_config = { ...(body.output_config || {}), effort: normEffort };
+        }
+      }
       break;
     }
     case "claude-budget": {
       if (none && canDisable) { body.thinking = { type: "disabled" }; break; }
       const budget = toBudget(eff, caps.thinkingRange);
-      body.thinking = budget === -1 ? { type: "enabled" } : { type: "enabled", budget_tokens: budget || 8192 };
+      // Anthropic Messages API requires budget_tokens (>= 1024) when type === "enabled"
+      const validBudget = Number.isFinite(budget) && budget >= 1024 ? budget : 8192;
+      body.thinking = { type: "enabled", budget_tokens: validBudget };
       break;
     }
     case "gemini-level": {

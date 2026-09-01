@@ -1,3 +1,22 @@
+# Unreleased
+
+## Features
+- **Video**: Google Veo joins xAI on `Media Providers → Video` — `veo-3.1-generate-preview`,
+  `veo-3.1-fast-generate-preview`, `veo-3.1-lite-generate-preview` and
+  `veo-2.0-generate-001` on the Gemini API key users already connect. The
+  gateway maps `/v1/videos/generations` onto Veo's `predictLongRunning` →
+  operation-poll flow and returns the same async job envelope xAI already
+  produces, so existing clients need no changes. A bare `veo-*` model id routes
+  to Gemini; anything else still defaults to xAI. `parameters` in the request
+  body is merged into the upstream call untouched, so Veo options 9Router
+  doesn't map yet can be passed through
+- **Video**: `GET /v1/videos/{id}/content` streams finished Veo videos through
+  the gateway. Veo hands back a Files API URI that only opens with the Gemini
+  API key, so the gateway downloads it server-side rather than handing the key
+  to the client
+- **CLI**: `9router gemini video --prompt "…" --output video.mp4` (also
+  `9router google video` / `9router veo`), mirroring `9router xai video`
+
 # v0.5.59 (2026-08-29)
 
 ## Features

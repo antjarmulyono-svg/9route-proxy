@@ -82,9 +82,24 @@ describe("applyThinking per provider format", () => {
     // Sonnet 5). Both fields together are the documented adaptive shape.
     expect(out.thinking).toEqual({ type: "adaptive" });
   });
+  it("claude adaptive thinking with auto effort does not send unsupported effort string", () => {
+    const out = apply("claude", "claude-sonnet-5", { reasoning_effort: "auto" }, "claude");
+    expect(out.thinking).toEqual({ type: "adaptive" });
+    expect(out.output_config?.effort).toBeUndefined();
+  });
+  it("claude adaptive thinking normalizes minimal to low", () => {
+    const out = apply("claude", "claude-fable-5", { reasoning_effort: "minimal" }, "claude");
+    expect(out.thinking).toEqual({ type: "adaptive" });
+    expect(out.output_config).toEqual({ effort: "low" });
+  });
   it("claude haiku → enabled+budget", () => {
     const out = apply("claude", "claude-haiku-4.5", { reasoning_effort: "high" }, "claude");
     expect(out.thinking).toEqual({ type: "enabled", budget_tokens: 24576 });
+  });
+  it("claude haiku auto effort gets a valid budget >= 1024", () => {
+    const out = apply("claude", "claude-haiku-4.5", { reasoning_effort: "auto" }, "claude");
+    expect(out.thinking.type).toBe("enabled");
+    expect(out.thinking.budget_tokens).toBeGreaterThanOrEqual(1024);
   });
   it("gemini-3 → thinkingLevel", () => {
     const out = apply("gemini", "gemini-3-pro", { reasoning_effort: "medium" }, "gemini");

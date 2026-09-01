@@ -60,9 +60,13 @@ export default {
     { id: "gemini-3.1-flash-tts-preview", name: "Gemini 3.1 Flash TTS", kind: "tts" },
     { id: "gemini-2.5-flash-preview-tts", name: "Gemini 2.5 Flash TTS", kind: "tts" },
     { id: "gemini-2.5-pro-preview-tts", name: "Gemini 2.5 Pro TTS", kind: "tts" },
+    { id: "veo-3.1-generate-preview", name: "Veo 3.1", params: ["aspect_ratio","duration_seconds","person_generation"], kind: "video" },
+    { id: "veo-3.1-fast-generate-preview", name: "Veo 3.1 Fast", params: ["aspect_ratio","duration_seconds","person_generation"], kind: "video" },
+    { id: "veo-3.1-lite-generate-preview", name: "Veo 3.1 Lite", params: ["aspect_ratio","duration_seconds","person_generation"], kind: "video" },
+    { id: "veo-2.0-generate-001", name: "Veo 2.0", params: ["aspect_ratio","duration_seconds","person_generation"], kind: "video" },
     { id: "embedding-001", name: "Embedding 001", dimensions: 768, kind: "embedding" },
   ],
-  serviceKinds: ["llm","embedding","image","imageToText","webSearch","tts","stt"],
+  serviceKinds: ["llm","embedding","image","imageToText","webSearch","tts","stt","video"],
   ttsConfig: {
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/models",
     authType: "apikey",
@@ -77,6 +81,10 @@ export default {
   },
   embeddingConfig: { baseUrl: "https://generativelanguage.googleapis.com/v1beta/models", authType: "apikey", authHeader: "key" },
   imageConfig: { baseUrl: "https://generativelanguage.googleapis.com/v1beta/models" },
+  videoConfig: {
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+    format: "gemini-veo",
+  },
   searchViaChat: {
     defaultModel: "gemini-2.5-flash",
     endpoint: "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
