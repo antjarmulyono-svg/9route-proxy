@@ -18,6 +18,7 @@ import {
   KIMCHI_CONFIG,
 } from "@/lib/oauth/constants/oauth";
 import { buildClineHeaders } from "@/shared/utils/clineAuth";
+import { ANTIGRAVITY_IDE_BASE_URL, ANTIGRAVITY_IDE_USER_AGENT } from "open-sse/providers/shared.js";
 
 // OAuth provider test endpoints
 const OAUTH_TEST_CONFIG = {
@@ -215,6 +216,74 @@ async function probeCloudCodeAssistAccess(connection, accessToken, effectiveProx
   };
 }
 
+// loadCodeAssist (probeCloudCodeAssistAccess) answers 200 even for accounts that
+// Google has flagged with VALIDATION_REQUIRED — the verification gate is only
+// enforced on the inference path. Verified empirically: identical token + relay
+// returned 200 on loadCodeAssist and 403 VALIDATION_REQUIRED on
+// streamGenerateContent for two accounts. Without this second probe the dashboard
+// reports those accounts "valid" and the router keeps routing traffic to them,
+// so every request burns a fallback hop before failing.
+// Cost is ~4 tokens per test, deliberately minimal.
+const ANTIGRAVITY_INFERENCE_TEST_MODEL = "gemini-3.7-flash-tiered";
+
+async function probeAntigravityInference(connection, accessToken, effectiveProxy = null) {
+  const url = `${ANTIGRAVITY_IDE_BASE_URL}/v1internal:generateContent`;
+  const body = {
+    model: ANTIGRAVITY_INFERENCE_TEST_MODEL,
+    project: connection.projectId || connection.providerSpecificData?.projectId || undefined,
+    request: { contents: [{ role: "user", parts: [{ text: "hi" }] }] },
+  };
+
+  let res;
+  try {
+    res = await fetchWithConnectionProxy(url, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        "User-Agent": ANTIGRAVITY_IDE_USER_AGENT,
+      },
+      body: JSON.stringify(body),
+    }, effectiveProxy);
+  } catch (err) {
+    // Network/relay failure is not evidence the account is blocked — do not
+    // downgrade a connection because the probe itself could not run.
+    return { valid: true, error: null, inconclusive: true, reason: err.message };
+  }
+
+  if (res.ok) return { valid: true, error: null };
+
+  const bodyText = await res.text().catch(() => "");
+  let reason = "";
+  try {
+    const start = bodyText.indexOf("{");
+    const parsed = JSON.parse(start >= 0 ? bodyText.slice(start) : bodyText);
+    reason = parsed?.error?.details?.[0]?.reason || "";
+  } catch {
+    // fall through — reason stays empty
+  }
+
+  if (res.status === 403 && reason === "VALIDATION_REQUIRED") {
+    return {
+      valid: false,
+      status: res.status,
+      error: "Google requires account verification — open the account in a browser and complete the challenge.",
+    };
+  }
+
+  // 429 / 5xx mean the credentials work but the account is throttled or Google is
+  // degraded. Treat as valid so a transient blip does not disable the connection.
+  if (res.status === 429 || res.status >= 500) {
+    return { valid: true, error: null, inconclusive: true, reason: `upstream ${res.status}` };
+  }
+
+  return {
+    valid: false,
+    status: res.status,
+    error: parseProviderErrorMessage(bodyText, `Inference probe returned ${res.status}`),
+  };
+}
+
 async function refreshOAuthToken(connection) {
   const provider = connection.provider;
   const refreshToken = connection.refreshToken;
@@ -351,13 +420,27 @@ async function testOAuthConnection(connection, effectiveProxy = null) {
 
   if (connection.provider === "gemini-cli" || connection.provider === "antigravity") {
     const initial = await probeCloudCodeAssistAccess(connection, accessToken, effectiveProxy);
-    if (initial.valid) return { valid: true, error: null, refreshed, newTokens };
+    if (initial.valid) {
+      if (connection.provider !== "antigravity") {
+        return { valid: true, error: null, refreshed, newTokens };
+      }
+      const inference = await probeAntigravityInference(connection, accessToken, effectiveProxy);
+      if (inference.valid) return { valid: true, error: null, refreshed, newTokens };
+      return { valid: false, error: inference.error, refreshed, newTokens };
+    }
 
     if (initial.status === 401 && config.refreshable && !refreshed && connection.refreshToken) {
       const tokens = await refreshOAuthToken(connection);
       if (tokens?.accessToken) {
         const retry = await probeCloudCodeAssistAccess(connection, tokens.accessToken, effectiveProxy);
-        if (retry.valid) return { valid: true, error: null, refreshed: true, newTokens: tokens };
+        if (retry.valid) {
+          if (connection.provider !== "antigravity") {
+            return { valid: true, error: null, refreshed: true, newTokens: tokens };
+          }
+          const inference = await probeAntigravityInference(connection, tokens.accessToken, effectiveProxy);
+          if (inference.valid) return { valid: true, error: null, refreshed: true, newTokens: tokens };
+          return { valid: false, error: inference.error, refreshed: true, newTokens: tokens };
+        }
         return { valid: false, error: retry.error, refreshed: true, newTokens: tokens };
       }
       return { valid: false, error: "Token invalid or revoked", refreshed: false };

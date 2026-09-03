@@ -52,10 +52,13 @@ function isChatRequest(tool, req) {
 const MODEL_SYNONYMS = {
   antigravity: {
     "gemini-default": "gemini-3.5-flash-low",
+    "gemini-3.8-flash-high": "gemini-3.8-flash-high",
+    "gemini-3.8-flash-medium": "gemini-3.8-flash-medium",
+    "gemini-3.8-flash-low": "gemini-3.8-flash-low",
     "gemini-3.5-flash-high": "gemini-3-flash-agent",
     "gemini-3.5-flash-medium": "gemini-3.5-flash-low",
     "gemini-3.5-flash-extra-low": "gemini-3.5-flash-extra-low",
-     "gemini-3.7-flash-high": "gemini-3.7-flash-high",
+    "gemini-3.7-flash-high": "gemini-3.7-flash-high",
     "gemini-3.7-flash-medium": "gemini-3.7-flash-medium",
     "gemini-3.7-flash-low": "gemini-3.7-flash-low",
     "gemini-3.1-pro-high": "gemini-pro-agent",
@@ -68,6 +71,12 @@ const MODEL_SYNONYMS = {
 // Order matters: more specific patterns first. Catches AG renamed variants (e.g. gemini-pro-agent)
 const MODEL_PATTERNS = {
   antigravity: [
+    { match: /3\.8.*flash.*high|3\.8.*high/i,                      alias: "gemini-3.8-flash-high" },
+    { match: /3\.8.*flash.*medium|3\.8.*medium/i,                  alias: "gemini-3.8-flash-medium" },
+    { match: /3\.8.*flash.*low|3\.8.*low/i,                        alias: "gemini-3.8-flash-low" },
+    { match: /3\.7.*flash.*high|3\.7.*high/i,                      alias: "gemini-3.7-flash-high" },
+    { match: /3\.7.*flash.*medium|3\.7.*medium/i,                  alias: "gemini-3.7-flash-medium" },
+    { match: /3\.7.*flash.*low|3\.7.*low/i,                        alias: "gemini-3.7-flash-low" },
     { match: /flash.*extra.*low|extra.*low.*flash|flash.*low|low.*flash/i, alias: "gemini-3.5-flash-extra-low" },
     { match: /flash.*medium|medium.*flash/i,                       alias: "gemini-3.5-flash-low" },
     { match: /flash.*agent|agent.*flash|flash/i,                   alias: "gemini-3-flash-agent" },
