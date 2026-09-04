@@ -231,7 +231,10 @@ async function probeAntigravityInference(connection, accessToken, effectiveProxy
   const body = {
     model: ANTIGRAVITY_INFERENCE_TEST_MODEL,
     project: connection.projectId || connection.providerSpecificData?.projectId || undefined,
-    request: { contents: [{ role: "user", parts: [{ text: "hi" }] }] },
+    request: {
+      contents: [{ role: "user", parts: [{ text: "hi" }] }],
+      generationConfig: { maxOutputTokens: 1 },
+    },
   };
 
   let res;
@@ -271,9 +274,10 @@ async function probeAntigravityInference(connection, accessToken, effectiveProxy
     };
   }
 
-  // 429 / 5xx mean the credentials work but the account is throttled or Google is
-  // degraded. Treat as valid so a transient blip does not disable the connection.
-  if (res.status === 429 || res.status >= 500) {
+  // 413 from relay (Vercel FUNCTION_PAYLOAD_TOO_LARGE), 429 rate-limit, or 5xx
+  // mean the credentials work but the relay/upstream has a transient issue.
+  // Treat as valid so infrastructure blips do not disable the connection.
+  if (res.status === 413 || res.status === 429 || res.status >= 500) {
     return { valid: true, error: null, inconclusive: true, reason: `upstream ${res.status}` };
   }
 
