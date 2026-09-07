@@ -238,6 +238,9 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
  */
 export async function markAccountUnavailable(connectionId, status, errorText, provider = null, model = null, resetsAtMs = null) {
   if (!connectionId || connectionId === "noauth") return { shouldFallback: false, cooldownMs: 0 };
+  // 400 Bad Request / INVALID_ARGUMENT is a client payload error, not an account fault.
+  // Do not lock accounts or burn through provider pool.
+  if (status === 400) return { shouldFallback: false, cooldownMs: 0 };
   const connections = await getProviderConnections({ provider });
   const conn = connections.find(c => c.id === connectionId);
   const backoffLevel = conn?.backoffLevel || 0;

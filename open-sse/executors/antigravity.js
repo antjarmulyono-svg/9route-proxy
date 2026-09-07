@@ -189,34 +189,44 @@ export class AntigravityExecutor extends BaseExecutor {
 
     // ─── Standard (non-image) request ───
     // Fix contents for Claude models via Antigravity
-    const contents = body.request?.contents?.map(c => {
-      let role = c.role;
-      // functionResponse must be role "user" for Claude models
-      if (c.parts?.some(p => p.functionResponse)) {
-        role = "user";
-      }
-      // Strip thought-only parts, keep thoughtSignature on functionCall parts (Gemini 3+ requires it)
-      const parts = c.parts?.filter(p => {
-        if (p.thought && !p.functionCall) return false;
-        if (p.thoughtSignature && !p.functionCall && !p.text) return false;
-        return true;
-      });
-      // Gemini 3+ rejects functionCall parts without thoughtSignature. Clients (Claude Code, IDE)
-      // don't persist thoughtSignature in their history, so backfill the default signature on any
-      // functionCall part that arrives without one.
-      const needsBackfill = parts?.some(p => p.functionCall && !p.thoughtSignature) ?? false;
-      if (role !== c.role || parts?.length !== c.parts?.length || needsBackfill) {
-        return {
-          ...c, role,
-          parts: needsBackfill
-            ? parts.map(p => (p.functionCall && !p.thoughtSignature)
-                ? { ...p, thoughtSignature: DEFAULT_THINKING_AG_SIGNATURE }
-                : p)
-            : parts,
-        };
-      }
-      return c;
-    });
+    const rawContents = body.request?.contents || [];
+    const contents = rawContents
+      .map(c => {
+        let role = c.role;
+        // Gemini API only accepts "user" and "model" in contents
+        if (role === "system") role = "user";
+        // functionResponse must be role "user" for Claude models
+        if (c.parts?.some(p => p.functionResponse)) {
+          role = "user";
+        }
+        // Strip thought-only parts, keep thoughtSignature on functionCall parts (Gemini 3+ requires it)
+        const parts = c.parts?.filter(p => {
+          if (p.thought && !p.functionCall) return false;
+          if (p.thoughtSignature && !p.functionCall && !p.text) return false;
+          return true;
+        });
+        // Gemini 3+ rejects functionCall parts without thoughtSignature. Clients (Claude Code, IDE)
+        // don't persist thoughtSignature in their history, so backfill the default signature on any
+        // functionCall part that arrives without one.
+        const needsBackfill = parts?.some(p => p.functionCall && !p.thoughtSignature) ?? false;
+        if (role !== c.role || parts?.length !== c.parts?.length || needsBackfill) {
+          return {
+            ...c, role,
+            parts: needsBackfill
+              ? parts.map(p => (p.functionCall && !p.thoughtSignature)
+                  ? { ...p, thoughtSignature: DEFAULT_THINKING_AG_SIGNATURE }
+                  : p)
+              : parts,
+          };
+        }
+        return c;
+      })
+      .filter(c => Array.isArray(c.parts) && c.parts.length > 0);
+
+    // If all turns were filtered out, provide minimal user turn so Google does not reject with 400
+    if (contents.length === 0 && rawContents.length > 0) {
+      contents.push({ role: "user", parts: [{ text: "continue" }] });
+    }
 
     // Sanitize tool schemas and function names before sending to Antigravity.
     let tools = body.request?.tools;
@@ -277,13 +287,17 @@ export class AntigravityExecutor extends BaseExecutor {
 
     this._lastSessionId = transformedRequest.sessionId; // cached for buildHeaders (base.execute order)
 
+    const resolvedModel = (body.model && !body.model.toLowerCase().includes("combo") && !body.model.includes("/"))
+      ? body.model
+      : model;
+
     return {
       ...body,
       project: projectId,
-      model: body.model || model,
+      model: resolvedModel,
       userAgent: "antigravity",
       requestType: "agent",
-      requestId: buildIdeRequestId({ body, request: transformedRequest, credentials, model, requestType: "agent" }),
+      requestId: buildIdeRequestId({ body, request: transformedRequest, credentials, model: resolvedModel, requestType: "agent" }),
       request: transformedRequest
     };
   }
