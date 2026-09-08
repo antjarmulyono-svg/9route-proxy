@@ -35,12 +35,13 @@ export async function GET() {
     const dbClients = await getAllClients();
     const liveMitmClients = await fetchMitmActiveClients();
 
+    const now = Date.now();
     const clientMap = new Map();
     for (const c of dbClients) {
-      clientMap.set(c.ip, { ...c, isLive: false });
+      const isLive = now - (c.lastSeen || 0) < 60000;
+      clientMap.set(c.ip, { ...c, isLive });
     }
 
-    const now = Date.now();
     for (const [ip, liveData] of Object.entries(liveMitmClients)) {
       const existing = clientMap.get(ip);
       const isLive = now - (liveData.lastSeen || 0) < 60000; // seen within 60s

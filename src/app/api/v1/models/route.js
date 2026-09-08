@@ -18,6 +18,7 @@ import { resolveZedModels } from "open-sse/shared/zedAuth.js";
 import { updateProviderCredentials } from "@/sse/services/tokenRefresh";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { capabilitiesFromServiceKind, getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
+import { trackIncomingRequest } from "@/lib/clients/clientTracker.js";
 
 // Per-provider live model resolvers. Each receives a connection record and
 // returns { models: [{ id, name? }, ...] } | null on failure.
@@ -560,6 +561,14 @@ export async function OPTIONS() {
  */
 export async function GET(request) {
   try {
+    const clientTrack = trackIncomingRequest(request);
+    if (!clientTrack.allowed) {
+      return Response.json(
+        { error: { message: "Client IP is disabled in 9Router. Toggle client connection to enable.", type: "client_disabled", code: 403 } },
+        { status: 403, headers: { "Access-Control-Allow-Origin": "*" } }
+      );
+    }
+
     // Detect cross-instance recursive /models fetch (another 9router fetching our /models)
     const skipDynamicFetch = request?.headers?.get(INTERNAL_MODELS_FETCH_HEADER) === "1";
     const data = await buildModelsList([LLM_KIND], { skipDynamicFetch });

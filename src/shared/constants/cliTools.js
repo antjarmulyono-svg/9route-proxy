@@ -466,6 +466,28 @@ gemini extensions install https://github.com/manalkaff/opendesign
 # Fetch and follow .opencode/INSTALL.md from the repo`,
     },
   },
+  "ai-sdk": {
+    id: "ai-sdk",
+    name: "AI SDK / OpenAI",
+    image: "/providers/openai.png",
+    color: "#10A37F",
+    description: "Vercel AI SDK & OpenAI Compatible Clients",
+    configType: "guide",
+    guideSteps: [
+      { step: 1, title: "Base URL", value: "{{baseUrl}}/v1", copyable: true },
+      { step: 2, title: "API Key", type: "apiKeySelector" },
+      { step: 3, title: "Select Model", type: "modelSelector" },
+    ],
+    codeBlock: {
+      language: "typescript",
+      code: `import { createOpenAI } from "@ai-sdk/openai";
+
+const openai = createOpenAI({
+  baseURL: "{{baseUrl}}/v1",
+  apiKey: "{{apiKey}}",
+});`,
+    },
+  },
   // HIDDEN: gemini-cli
   // "gemini-cli": {
   //   id: "gemini-cli",

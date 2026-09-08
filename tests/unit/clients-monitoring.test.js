@@ -89,8 +89,11 @@ describe("Client Connections Monitoring & On/Off Control", () => {
       headers: { "user-agent": "droid-cli/1.0" },
       url: "/v1/chat/completions",
     };
-    expect(detectToolFromRequest(droidReq).tool).toBe("Droid");
+    const droidDetect = detectToolFromRequest(droidReq);
+    expect(droidDetect.tool).toBe("Factory Droid");
+    expect(droidDetect.toolId).toBe("droid");
   });
+
 
   it("should extract and normalize client IPs including IPv6-mapped IPv4", async () => {
     const { normalizeIp, extractClientIp } = await import("@/lib/clients/clientTracker.js");
