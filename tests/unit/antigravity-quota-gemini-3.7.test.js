@@ -57,5 +57,23 @@ describe("Antigravity quota tracker: Gemini 3.7 Flash usage bars", () => {
       total: 1000,
       remainingPercentage: 35,
     });
+    expect(usage.quotas["gemini-3.8-flash-high"]).toMatchObject({
+      used: 150,
+      total: 1000,
+      remainingPercentage: 85,
+      displayName: "Gemini 3.8 Flash (High)",
+    });
+    expect(usage.quotas["gemini-3.8-flash-medium"]).toMatchObject({
+      used: 400,
+      total: 1000,
+      remainingPercentage: 60,
+      displayName: "Gemini 3.8 Flash (Medium)",
+    });
+    expect(usage.quotas["gemini-3.8-flash-low"]).toMatchObject({
+      used: 650,
+      total: 1000,
+      remainingPercentage: 35,
+      displayName: "Gemini 3.8 Flash (Low)",
+    });
   });
 });

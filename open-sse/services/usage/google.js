@@ -210,6 +210,40 @@ export async function getAntigravityUsage(accessToken, providerSpecificData, pro
           displayName: info.displayName || modelKey,
         };
       }
+
+      // Support tiered 3.7 if Google returns only gemini-3.7-flash-tiered
+      if (!quotas["gemini-3.7-flash-high"] && data.models["gemini-3.7-flash-tiered"]?.quotaInfo) {
+        const tieredInfo = data.models["gemini-3.7-flash-tiered"];
+        const remainingFraction = tieredInfo.quotaInfo.remainingFraction || 0;
+        const remainingPercentage = remainingFraction * 100;
+        const total = 1000;
+        const remaining = Math.round(total * remainingFraction);
+        const used = total - remaining;
+        for (const tier of ["high", "medium", "low"]) {
+          const capitalTier = tier.charAt(0).toUpperCase() + tier.slice(1);
+          quotas[`gemini-3.7-flash-${tier}`] = {
+            used,
+            total,
+            resetAt: parseResetTime(tieredInfo.quotaInfo.resetTime),
+            remainingPercentage,
+            unlimited: false,
+            displayName: `Gemini 3.7 Flash (${capitalTier})`,
+          };
+        }
+      }
+
+      // Virtual mirror: Google upstream doesn't report 3.8 quota yet; mirror 3.7
+      for (const tier of ["high", "medium", "low"]) {
+        const k38 = `gemini-3.8-flash-${tier}`;
+        const k37 = `gemini-3.7-flash-${tier}`;
+        if (!quotas[k38] && quotas[k37]) {
+          const capitalTier = tier.charAt(0).toUpperCase() + tier.slice(1);
+          quotas[k38] = {
+            ...quotas[k37],
+            displayName: `Gemini 3.8 Flash (${capitalTier})`,
+          };
+        }
+      }
     }
 
     return {
