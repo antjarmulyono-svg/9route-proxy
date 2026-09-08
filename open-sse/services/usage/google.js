@@ -122,19 +122,51 @@ export async function getAntigravityUsage(accessToken, providerSpecificData, pro
     const subscriptionInfo = await getAntigravitySubscriptionInfo(accessToken, proxyOptions);
     const projectId = subscriptionInfo?.cloudaicompanionProject || null;
 
-    const response = await fetchWithTimeout(ANTIGRAVITY_CONFIG.quotaApiUrl, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${accessToken}`,
-        "User-Agent": ANTIGRAVITY_CONFIG.userAgent,
-        "Content-Type": "application/json",
-        "X-Client-Name": "antigravity",
-        "X-Client-Version": ANTIGRAVITY_IDE_VERSION,
-      },
-      body: JSON.stringify({
-        ...(projectId ? { project: projectId } : {})
-      }),
-    }, 10000, proxyOptions);
+    let response = null;
+    try {
+      response = await fetchWithTimeout(ANTIGRAVITY_CONFIG.quotaApiUrl, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "User-Agent": ANTIGRAVITY_CONFIG.userAgent,
+          "Content-Type": "application/json",
+          "X-Client-Name": "antigravity",
+          "X-Client-Version": ANTIGRAVITY_IDE_VERSION,
+        },
+        body: JSON.stringify({
+          ...(projectId ? { project: projectId } : {})
+        }),
+      }, 10000, proxyOptions);
+    } catch {
+      // primary failed, try fallback
+    }
+
+    if ((!response || (!response.ok && response.status !== 401 && response.status !== 403)) && ANTIGRAVITY_CONFIG.fallbackQuotaApiUrl) {
+      try {
+        const fallbackRes = await fetchWithTimeout(ANTIGRAVITY_CONFIG.fallbackQuotaApiUrl, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${accessToken}`,
+            "User-Agent": ANTIGRAVITY_CONFIG.userAgent,
+            "Content-Type": "application/json",
+            "X-Client-Name": "antigravity",
+            "X-Client-Version": ANTIGRAVITY_IDE_VERSION,
+          },
+          body: JSON.stringify({
+            ...(projectId ? { project: projectId } : {})
+          }),
+        }, 10000, proxyOptions);
+        if (fallbackRes?.ok) {
+          response = fallbackRes;
+        }
+      } catch {
+        // preserve original response
+      }
+    }
+
+    if (!response) {
+      throw new Error("Antigravity API unreachable");
+    }
 
     if (response.status === 403) {
       return {
@@ -211,6 +243,27 @@ export async function getAntigravityUsage(accessToken, providerSpecificData, pro
         };
       }
 
+      // Support tiered 3.8 if Google returns gemini-3.8-flash-tiered
+      if (!quotas["gemini-3.8-flash-high"] && data.models["gemini-3.8-flash-tiered"]?.quotaInfo) {
+        const tieredInfo = data.models["gemini-3.8-flash-tiered"];
+        const remainingFraction = tieredInfo.quotaInfo.remainingFraction || 0;
+        const remainingPercentage = remainingFraction * 100;
+        const total = 1000;
+        const remaining = Math.round(total * remainingFraction);
+        const used = total - remaining;
+        for (const tier of ["high", "medium", "low"]) {
+          const capitalTier = tier.charAt(0).toUpperCase() + tier.slice(1);
+          quotas[`gemini-3.8-flash-${tier}`] = {
+            used,
+            total,
+            resetAt: parseResetTime(tieredInfo.quotaInfo.resetTime),
+            remainingPercentage,
+            unlimited: false,
+            displayName: `Gemini 3.8 Flash (${capitalTier})`,
+          };
+        }
+      }
+
       // Support tiered 3.7 if Google returns only gemini-3.7-flash-tiered
       if (!quotas["gemini-3.7-flash-high"] && data.models["gemini-3.7-flash-tiered"]?.quotaInfo) {
         const tieredInfo = data.models["gemini-3.7-flash-tiered"];
@@ -232,7 +285,7 @@ export async function getAntigravityUsage(accessToken, providerSpecificData, pro
         }
       }
 
-      // Virtual mirror: Google upstream doesn't report 3.8 quota yet; mirror 3.7
+      // Virtual mirror fallback: If upstream didn't report 3.8 quota, mirror 3.7
       for (const tier of ["high", "medium", "low"]) {
         const k38 = `gemini-3.8-flash-${tier}`;
         const k37 = `gemini-3.7-flash-${tier}`;
@@ -262,17 +315,39 @@ export async function getAntigravityUsage(accessToken, providerSpecificData, pro
  */
 async function getAntigravitySubscriptionInfo(accessToken, proxyOptions = null) {
   try {
-    const response = await fetchWithTimeout(ANTIGRAVITY_CONFIG.loadProjectApiUrl, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${accessToken}`,
-        "User-Agent": ANTIGRAVITY_CONFIG.userAgent,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ metadata: CLIENT_METADATA, mode: 1 }),
-    }, 10000, proxyOptions);
+    let response = null;
+    try {
+      response = await fetchWithTimeout(ANTIGRAVITY_CONFIG.loadProjectApiUrl, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "User-Agent": ANTIGRAVITY_CONFIG.userAgent,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ metadata: CLIENT_METADATA, mode: 1 }),
+      }, 10000, proxyOptions);
+    } catch {
+      // primary failed
+    }
 
-    if (!response.ok) return null;
+    if ((!response || !response.ok) && ANTIGRAVITY_CONFIG.fallbackLoadProjectApiUrl) {
+      try {
+        const fallbackRes = await fetchWithTimeout(ANTIGRAVITY_CONFIG.fallbackLoadProjectApiUrl, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${accessToken}`,
+            "User-Agent": ANTIGRAVITY_CONFIG.userAgent,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ metadata: CLIENT_METADATA, mode: 1 }),
+        }, 10000, proxyOptions);
+        if (fallbackRes?.ok) response = fallbackRes;
+      } catch {
+        // ignore fallback errors
+      }
+    }
+
+    if (!response || !response.ok) return null;
     return await response.json();
   } catch (error) {
     console.error("[Antigravity Subscription] Error:", error.message);

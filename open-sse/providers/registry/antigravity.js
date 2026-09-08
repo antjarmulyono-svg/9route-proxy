@@ -36,9 +36,12 @@ export default {
       },
     },
     usage: {
-      // Discovery (quota/project) on PROD; daily host rejects these.
-      quotaApiUrl: "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels",
-      loadProjectApiUrl: "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
+      // Primary quota host: daily-cloudcode matches ANTIGRAVITY_IDE_BASE_URL where chat requests execute.
+      // Fallback host: production cloudcode-pa.
+      quotaApiUrl: "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels",
+      fallbackQuotaApiUrl: "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels",
+      loadProjectApiUrl: "https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
+      fallbackLoadProjectApiUrl: "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
       tokenUrl: "https://oauth2.googleapis.com/token",
     },
     clientId: ANTIGRAVITY_OAUTH_CLIENT.clientId,
