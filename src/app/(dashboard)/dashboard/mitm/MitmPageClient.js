@@ -5,6 +5,7 @@ import { MITM_TOOLS } from "@/shared/constants/cliTools";
 import { getModelsByProviderId } from "@/shared/constants/models";
 import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider } from "@/shared/constants/providers";
 import { MitmServerCard, MitmToolCard } from "@/app/(dashboard)/dashboard/cli-tools/components";
+import MitmClientConnectionsCard from "./components/MitmClientConnectionsCard";
 
 export default function MitmPageClient() {
   const [connections, setConnections] = useState([]);
@@ -89,6 +90,9 @@ export default function MitmPageClient() {
         cloudEnabled={cloudEnabled}
         onStatusChange={setMitmStatus}
       />
+
+      {/* Connected Clients Card */}
+      <MitmClientConnectionsCard />
 
       {/* Tool Cards */}
       <div className="grid gap-3 sm:gap-4">

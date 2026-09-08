@@ -10,7 +10,7 @@ const { log, err, dumpRequest, createResponseDumper, clearDumpDir } = require(".
 const { IS_DEV, LSOF_BIN, listeningPids, TARGET_HOSTS, URL_PATTERNS, MODEL_SYNONYMS, MODEL_PATTERNS, MODEL_NO_MAP, getToolForHost, isChatRequest, extractModel } = require("./config");
 const { DATA_DIR, MITM_DIR } = require("./paths");
 const { generateCert, getCertForDomain } = require("./cert/generate");
-const { getMitmAlias } = require("./dbReader");
+const { getMitmAlias, isClientEnabled } = require("./dbReader");
 const { applyAntigravityIdeVersionOverride } = require("./antigravityIdeVersion");
 const LOCAL_PORT = 443;
 const IS_WIN = process.platform === "win32";
@@ -290,13 +290,24 @@ async function passthroughHttps(req, res, bodyBuffer, headers, targetHost, onRes
   forwardReq.end();
 }
 
-// ── Request handler ───────────────────────────────────────────
+// ── Active Client Connections Tracker ────────────────────────
+const activeClientsMap = new Map();
 
 const server = https.createServer(sslOptions, async (req, res) => {
   try {
     if (req.url === "/_mitm_health") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true, pid: process.pid }));
+      return;
+    }
+
+    if (req.url === "/_mitm_clients") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      const clientsObj = {};
+      for (const [ip, data] of activeClientsMap.entries()) {
+        clientsObj[ip] = data;
+      }
+      res.end(JSON.stringify({ ok: true, clients: clientsObj }));
       return;
     }
 
@@ -308,7 +319,26 @@ const server = https.createServer(sslOptions, async (req, res) => {
       return passthrough(req, res, bodyBuffer);
     }
 
+    // Extract & normalize Client IP
+    const rawIp = req.socket?.remoteAddress || "";
+    const clientIp = rawIp.replace(/^::ffff:/, "").trim() || "127.0.0.1";
     const tool = getToolForHost(req.headers.host);
+
+    // Track active connection
+    const now = Date.now();
+    const existing = activeClientsMap.get(clientIp) || { ip: clientIp, count: 0, firstSeen: now };
+    existing.count += 1;
+    existing.lastSeen = now;
+    if (tool) existing.tool = tool;
+    existing.lastHost = req.headers.host;
+    activeClientsMap.set(clientIp, existing);
+
+    // Client connection rule check: if client is disabled, bypass to native upstream
+    if (!isClientEnabled(clientIp)) {
+      log(`🛑 [mitm] Client ${clientIp} is DISABLED in 9Router -> passthrough directly to default upstream`);
+      return passthrough(req, res, bodyBuffer);
+    }
+
     if (!tool) return passthrough(req, res, bodyBuffer);
 
     // Kiro IDE posts chat to `/` with x-amz-target (not path /generateAssistantResponse)

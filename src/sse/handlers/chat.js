@@ -23,6 +23,7 @@ import { detectFormatByEndpoint } from "open-sse/translator/formats.js";
 import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { getProjectIdForConnection } from "open-sse/services/projectId.js";
+import { trackIncomingRequest } from "@/lib/clients/clientTracker.js";
 
 /**
  * Handle chat completion request
@@ -48,6 +49,13 @@ export async function handleChat(request, clientRawRequest = null) {
     };
   }
   const modelStr = body.model;
+
+  // Client IP tracking & access enforcement
+  const clientInfo = trackIncomingRequest(request, body);
+  if (!clientInfo.allowed) {
+    log.warn("AUTH", `Client IP ${clientInfo.ip} is disabled in 9Router`);
+    return errorResponse(HTTP_STATUS.FORBIDDEN, `Client IP ${clientInfo.ip} is disabled in 9Router connection settings`);
+  }
 
   // Request summary is emitted as the unified "▶" line in chatCore (has fmt/thinking/account)
 

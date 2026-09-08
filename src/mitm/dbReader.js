@@ -19,4 +19,29 @@ function getMitmAlias(toolName) {
   return all?.[toolName] || null;
 }
 
-module.exports = { getMitmAlias };
+const CLIENTS_CACHE_FILE = path.join(DATA_DIR, "mitm", "clients.json");
+
+function readClientsCache() {
+  try {
+    if (!fs.existsSync(CLIENTS_CACHE_FILE)) return null;
+    return JSON.parse(fs.readFileSync(CLIENTS_CACHE_FILE, "utf-8"));
+  } catch { return null; }
+}
+
+function isClientEnabled(clientIp) {
+  if (!clientIp) return true;
+  const normalized = clientIp.replace(/^::ffff:/, "").trim();
+  const rules = readClientsCache();
+  if (!rules) return true;
+  const rule = rules[normalized];
+  if (rule && rule.enabled === false) {
+    return false;
+  }
+  return true;
+}
+
+function getClientRules() {
+  return readClientsCache() || {};
+}
+
+module.exports = { getMitmAlias, isClientEnabled, getClientRules };
