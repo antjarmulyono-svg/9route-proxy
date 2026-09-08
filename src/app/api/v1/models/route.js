@@ -17,7 +17,7 @@ import { resolveCursorModels } from "open-sse/services/cursorModels.js";
 import { resolveZedModels } from "open-sse/shared/zedAuth.js";
 import { updateProviderCredentials } from "@/sse/services/tokenRefresh";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
-import { capabilitiesFromServiceKind, getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
+import { capabilitiesFromServiceKind, getCapabilitiesForModel, DEFAULT_CAPABILITIES } from "open-sse/providers/capabilities.js";
 import { trackIncomingRequest } from "@/lib/clients/clientTracker.js";
 
 // Per-provider live model resolvers. Each receives a connection record and
@@ -238,6 +238,73 @@ function comboMatchesKinds(combo, kindFilter) {
   return kindFilter.includes(kind);
 }
 
+const ALIAS_TO_PROVIDER_ID = Object.fromEntries(
+  Object.entries(PROVIDER_ID_TO_ALIAS).map(([id, alias]) => [alias, id])
+);
+
+function resolveCapsForModelString(fullModelStr) {
+  if (!fullModelStr || typeof fullModelStr !== "string") return null;
+  const parts = fullModelStr.split("/");
+  if (parts.length >= 2) {
+    const alias = parts[0];
+    const rawModel = parts.slice(1).join("/");
+    const providerId = ALIAS_TO_PROVIDER_ID[alias] || alias;
+    return getCapabilitiesForModel(providerId, rawModel);
+  }
+  return getCapabilitiesForModel(null, fullModelStr);
+}
+
+function resolveComboCapabilities(combo) {
+  let models = combo?.models;
+  if (typeof models === "string") {
+    try {
+      models = JSON.parse(models);
+    } catch {
+      models = [];
+    }
+  }
+  if (!Array.isArray(models) || models.length === 0) {
+    return {
+      capabilities: { ...DEFAULT_CAPABILITIES, contextWindow: 1048576, maxOutput: 65536 },
+      contextWindow: 1048576,
+      maxOutput: 65536,
+    };
+  }
+
+  const capsList = models.map(resolveCapsForModelString).filter(Boolean);
+  const primaryCaps = capsList[0] || null;
+
+  const windows = capsList.map((c) => c.contextWindow).filter(Number.isFinite);
+  const outputs = capsList.map((c) => c.maxOutput).filter(Number.isFinite);
+
+  const contextWindow = Number.isFinite(primaryCaps?.contextWindow)
+    ? primaryCaps.contextWindow
+    : (windows.length > 0 ? Math.max(...windows) : 1048576);
+
+  const maxOutput = Number.isFinite(primaryCaps?.maxOutput)
+    ? primaryCaps.maxOutput
+    : (outputs.length > 0 ? Math.max(...outputs) : 65536);
+
+  const mergedCaps = {
+    ...(primaryCaps || DEFAULT_CAPABILITIES),
+    vision: capsList.some((c) => c.vision),
+    tools: capsList.some((c) => c.tools),
+    reasoning: capsList.some((c) => c.reasoning),
+    search: capsList.some((c) => c.search),
+    pdf: capsList.some((c) => c.pdf),
+    audioInput: capsList.some((c) => c.audioInput),
+    videoInput: capsList.some((c) => c.videoInput),
+    contextWindow,
+    maxOutput,
+  };
+
+  return {
+    capabilities: mergedCaps,
+    contextWindow,
+    maxOutput,
+  };
+}
+
 /**
  * Build OpenAI-format models list filtered by service kinds.
  * @param {string[]} kindFilter - List of service kinds to include (e.g. ["llm"], ["webSearch","webFetch"]).
@@ -303,17 +370,25 @@ export async function buildModelsList(kindFilter, options = {}) {
     };
     if (combo.kind === "webSearch" || combo.kind === "webFetch") {
       entry.kind = combo.kind;
+    } else {
+      const comboCaps = resolveComboCapabilities(combo);
+      if (comboCaps) {
+        entry.capabilities = comboCaps.capabilities;
+        if (Number.isFinite(comboCaps.contextWindow)) {
+          entry.context_length = comboCaps.contextWindow;
+        }
+        if (Number.isFinite(comboCaps.maxOutput)) {
+          entry.max_completion_tokens = comboCaps.maxOutput;
+        }
+      }
     }
     models.push(entry);
   }
 
   if (connections.length === 0) {
     // DB unavailable -> return static models, filtered by per-model kind
-    const aliasToProviderId = Object.fromEntries(
-      Object.entries(PROVIDER_ID_TO_ALIAS).map(([id, alias]) => [alias, id])
-    );
     for (const [alias, providerModels] of Object.entries(PROVIDER_MODELS)) {
-      const providerId = aliasToProviderId[alias] || alias;
+      const providerId = ALIAS_TO_PROVIDER_ID[alias] || alias;
       if (!providerMatchesKinds(providerId, kindFilter)) continue;
       for (const model of providerModels) {
         if (!kindFilter.includes(modelKind(model))) continue;
