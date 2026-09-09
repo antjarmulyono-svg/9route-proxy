@@ -13,12 +13,8 @@ set -e
 RAW_TARGET="${1:-${ROUTER_IP:-}}"
 
 if [ -z "$RAW_TARGET" ]; then
-  read -r -p "Masukkan IP / Host Server 9Router (contoh: 10.10.123.206): " RAW_TARGET
-fi
-
-if [ -z "$RAW_TARGET" ]; then
-  echo "❌ Error: IP atau domain server 9Router wajib diisi."
-  exit 1
+  read -r -p "Masukkan IP / Host Server 9Router [default: 10.10.123.206:20128]: " RAW_TARGET
+  RAW_TARGET="${RAW_TARGET:-10.10.123.206:20128}"
 fi
 
 # Clean protocol, trailing slashes, and extract host vs port
