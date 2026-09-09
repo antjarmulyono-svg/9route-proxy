@@ -10,24 +10,34 @@
 set -e
 
 # 1. Resolve 9Router Server Host/IP (CLI Argument > Environment Variable > Interactive Prompt)
-ROUTER_IP="${1:-${ROUTER_IP:-}}"
+RAW_TARGET="${1:-${ROUTER_IP:-}}"
 
-if [ -z "$ROUTER_IP" ]; then
-  read -r -p "Masukkan IP / Host Server 9Router (contoh: 10.10.123.206): " ROUTER_IP
+if [ -z "$RAW_TARGET" ]; then
+  read -r -p "Masukkan IP / Host Server 9Router (contoh: 10.10.123.206): " RAW_TARGET
 fi
 
-if [ -z "$ROUTER_IP" ]; then
+if [ -z "$RAW_TARGET" ]; then
   echo "❌ Error: IP atau domain server 9Router wajib diisi."
   exit 1
 fi
 
-ROUTER_PORT="${ROUTER_PORT:-20128}"
+# Clean protocol, trailing slashes, and extract host vs port
+CLEAN_TARGET=$(echo "$RAW_TARGET" | sed -e 's|^https*://||' -e 's|/.*$||')
+
+if echo "$CLEAN_TARGET" | grep -q ":"; then
+  ROUTER_IP=$(echo "$CLEAN_TARGET" | cut -d: -f1)
+  ROUTER_PORT=$(echo "$CLEAN_TARGET" | cut -d: -f2)
+else
+  ROUTER_IP="$CLEAN_TARGET"
+  ROUTER_PORT="${ROUTER_PORT:-20128}"
+fi
+
 HOSTS_FILE="/etc/hosts"
 CA_DIR="/usr/local/share/ca-certificates"
 CERT_FILE="${CA_DIR}/9router-root-ca.crt"
 
-# 2. Determine sudo invocation safely without hardcoded credentials
-if [ "$EUID" -eq 0 ]; then
+# 2. Determine sudo invocation safely without hardcoded credentials (POSIX compatible)
+if [ "$(id -u)" -eq 0 ]; then
   SUDO=""
 else
   if ! command -v sudo >/dev/null 2>&1; then
@@ -39,7 +49,7 @@ fi
 
 echo "======================================================================"
 echo "🚀 Running 1-Click Setup for Antigravity Remote Client"
-echo "🌐 9Router Server Target: ${ROUTER_IP}"
+echo "🌐 9Router Server Target: ${ROUTER_IP} (Port: ${ROUTER_PORT})"
 echo "======================================================================"
 
 # 3. Connectivity check
@@ -48,14 +58,9 @@ if ! ping -c 1 -W 2 "$ROUTER_IP" >/dev/null 2>&1; then
   echo "⚠️ Warning: Ping ke ${ROUTER_IP} tidak merespons (mungkin diblokir ICMP). Melanjutkan pengujian HTTP..."
 fi
 
-# 4. Update /etc/hosts
+# 4. Update /etc/hosts (POSIX compatible loop without bash array syntax)
 echo "🌐 [2/5] Updating ${HOSTS_FILE} for Antigravity Google domains..."
-DOMAINS=(
-  "daily-cloudcode-pa.googleapis.com"
-  "cloudcode-pa.googleapis.com"
-)
-
-for domain in "${DOMAINS[@]}"; do
+for domain in daily-cloudcode-pa.googleapis.com cloudcode-pa.googleapis.com; do
   $SUDO sed -i "/[[:space:]]${domain}/d" "$HOSTS_FILE" 2>/dev/null || true
   echo "${ROUTER_IP} ${domain}" | $SUDO tee -a "$HOSTS_FILE" >/dev/null
 done

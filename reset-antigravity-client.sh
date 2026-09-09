@@ -5,7 +5,7 @@
 # ==============================================================================
 set -e
 
-if [ "$EUID" -eq 0 ]; then
+if [ "$(id -u)" -eq 0 ]; then
   SUDO=""
 else
   if ! command -v sudo >/dev/null 2>&1; then
