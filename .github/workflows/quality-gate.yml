@@ -1,0 +1,80 @@
+name: Quality Gate
+
+# Nothing ran tests or lint on push before this, which is how the suite drifted
+# from 64 to 89 failures unnoticed. This workflow makes that drift visible.
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Tests (regression gate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install app dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Install test dependencies
+        run: npm --prefix tests ci --no-audit --no-fund
+
+      # The gate compares the current failures against
+      # tests/__baseline__/known-fails.txt and only fails the build on a
+      # pass -> fail transition. Pre-existing baseline failures (live network
+      # suites, macOS Keychain import) stay red without blocking everyone.
+      - name: Run regression gate
+        run: npm run test:gate
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: .test-results.json
+          retention-days: 7
+
+  lint:
+    name: Lint (errors only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+
+      # Reported but not enforced yet: there are 139 pre-existing errors, so
+      # failing the build here would block every PR. Flip continue-on-error to
+      # false once that backlog is cleared.
+      - name: Report lint errors
+        run: npm run lint:errors
+        continue-on-error: true
+
+  build:
+    name: Production build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+
+      - name: Build
+        run: npm run build

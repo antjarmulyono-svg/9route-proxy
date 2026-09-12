@@ -86,3 +86,6 @@ graphify-out/*
 .codegraph/
 .PR/
 .next-analyze/*
+
+# Test gate output (npm run test:gate)
+.test-results.json

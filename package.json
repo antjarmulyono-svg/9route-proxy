@@ -14,7 +14,13 @@
     "build:bun": "bun --bun next build --webpack",
     "start:bun": "bun ./.next/standalone/custom-server.js",
     "cli:pack": "npm --prefix cli run pack:cli",
-    "cli:publish": "npm --prefix cli run publish:cli"
+    "cli:publish": "npm --prefix cli run publish:cli",
+    "test": "./tests/node_modules/.bin/vitest run --config tests/vitest.config.js tests/unit/",
+    "test:watch": "./tests/node_modules/.bin/vitest --config tests/vitest.config.js tests/unit/",
+    "test:json": "./tests/node_modules/.bin/vitest run --config tests/vitest.config.js tests/unit/ --reporter=json --outputFile=.test-results.json",
+    "test:gate": "npm run test:json; node tests/__baseline__/verify-no-regression.mjs .test-results.json",
+    "lint": "next lint --max-warnings=9999",
+    "lint:errors": "eslint . --quiet"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

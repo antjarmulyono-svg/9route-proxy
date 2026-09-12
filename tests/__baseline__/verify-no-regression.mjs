@@ -12,9 +12,19 @@ const resultsPath = process.argv[2];
 if (!resultsPath) { console.error("Missing results.json path"); process.exit(2); }
 
 const r = JSON.parse(readFileSync(resultsPath, "utf8"));
+
+// Test names are stored as absolute paths, which differ between the container
+// (/app/tests/...) and a host checkout. Anchor on the repo-relative segment so
+// one baseline file is valid in both, instead of splitting on "/app/" and
+// silently producing "undefined :: ..." keys that match nothing.
+const repoRelative = (name) => {
+  const at = name.lastIndexOf("/tests/");
+  return at === -1 ? name : name.slice(at + 1);
+};
+
 const nowFails = r.testResults.flatMap(f =>
   f.assertionResults.filter(a => a.status === "failed")
-    .map(a => f.name.split("/app/")[1] + " :: " + a.fullName)
+    .map(a => repoRelative(f.name) + " :: " + a.fullName)
 );
 
 // Regression = fail bây giờ NHƯNG không có trong baseline known-fails
