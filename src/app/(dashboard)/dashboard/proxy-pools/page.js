@@ -1,12 +1,33 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, useRef } from "react";
-import { Badge, Button, Card, CardSkeleton, Input, Modal, Toggle, ConfirmModal } from "@/shared/components";
+import { Badge, Button, Card, CardSkeleton, Input, Modal, Select, Toggle, ConfirmModal } from "@/shared/components";
 import { useNotificationStore } from "@/store/notificationStore";
+import {
+  PROXY_REGIONS,
+  PROXY_TIERS,
+  DEFAULT_PROXY_REGION,
+  DEFAULT_PROXY_TIER,
+  regionLabel,
+  tierLabel,
+} from "@/shared/constants/proxyPoolMeta";
+
+const ALL_FILTER = "__all__";
+
+const REGION_OPTIONS = PROXY_REGIONS.map((r) => ({ value: r.id, label: r.label }));
+const TIER_OPTIONS = PROXY_TIERS.map((t) => ({ value: t.id, label: t.label }));
 
 function getStatusVariant(status) {
   if (status === "active") return "success";
   if (status === "error") return "error";
+  return "default";
+}
+
+// Higher tiers read as more premium, so escalate the badge colour with rank.
+function getTierVariant(tier) {
+  if (tier === "enterprise") return "error";
+  if (tier === "premium") return "warning";
+  if (tier === "pro") return "success";
   return "default";
 }
 
@@ -22,6 +43,8 @@ function normalizeFormData(data = {}) {
     name: data.name || "",
     proxyUrl: data.proxyUrl || "",
     noProxy: data.noProxy || "",
+    region: data.region || DEFAULT_PROXY_REGION,
+    tier: data.tier || DEFAULT_PROXY_TIER,
     isActive: data.isActive !== false,
     strictProxy: data.strictProxy === true,
   };
@@ -51,6 +74,8 @@ export default function ProxyPoolsPage() {
   const [healthProgress, setHealthProgress] = useState({ current: 0, total: 0 });
   const [bulkBusy, setBulkBusy] = useState(false);
   const [confirmState, setConfirmState] = useState(null);
+  const [regionFilter, setRegionFilter] = useState(ALL_FILTER);
+  const [tierFilter, setTierFilter] = useState(ALL_FILTER);
   const relayMenuRef = useRef(null);
   const notify = useNotificationStore();
 
@@ -110,6 +135,8 @@ export default function ProxyPoolsPage() {
       name: formData.name.trim(),
       proxyUrl: formData.proxyUrl.trim(),
       noProxy: formData.noProxy.trim(),
+      region: formData.region,
+      tier: formData.tier,
       isActive: formData.isActive === true,
       strictProxy: formData.strictProxy === true,
     };
@@ -208,13 +235,27 @@ export default function ProxyPoolsPage() {
     }
   };
 
-  const allSelected = proxyPools.length > 0 && selectedIds.length === proxyPools.length;
+  // Declared before the selection helpers because they read from it; bulk
+  // actions are scoped to the visible list so a filtered-out pool can never be
+  // silently deactivated or deleted.
+  const visiblePools = useMemo(
+    () => proxyPools.filter((pool) => {
+      if (regionFilter !== ALL_FILTER && pool.region !== regionFilter) return false;
+      if (tierFilter !== ALL_FILTER && pool.tier !== tierFilter) return false;
+      return true;
+    }),
+    [proxyPools, regionFilter, tierFilter]
+  );
+
+  const isFiltered = regionFilter !== ALL_FILTER || tierFilter !== ALL_FILTER;
+
+  const allSelected = visiblePools.length > 0 && selectedIds.length === visiblePools.length;
   const toggleSelect = (id) => setSelectedIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
-  const toggleSelectAll = () => setSelectedIds(allSelected ? [] : proxyPools.map((p) => p.id));
+  const toggleSelectAll = () => setSelectedIds(allSelected ? [] : visiblePools.map((p) => p.id));
   const clearSelection = () => setSelectedIds([]);
 
   const bulkSetActive = async (isActive) => {
-    const targets = selectedIds.length > 0 ? selectedIds : proxyPools.map((p) => p.id);
+    const targets = selectedIds.length > 0 ? selectedIds : visiblePools.map((p) => p.id);
     if (targets.length === 0) return;
     setBulkBusy(true);
     try {
@@ -651,6 +692,36 @@ export default function ProxyPoolsPage() {
           )}
           <Badge variant="default">Total: {proxyPools.length}</Badge>
           <Badge variant="success">Active: {activeCount}</Badge>
+          {isFiltered && (
+            <Badge variant="warning">Showing: {visiblePools.length}</Badge>
+          )}
+
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <Select
+              value={regionFilter}
+              onChange={(e) => setRegionFilter(e.target.value)}
+              options={[{ value: ALL_FILTER, label: "All regions" }, ...REGION_OPTIONS]}
+              className="w-full sm:w-44"
+              selectClassName="py-1.5 text-xs"
+            />
+            <Select
+              value={tierFilter}
+              onChange={(e) => setTierFilter(e.target.value)}
+              options={[{ value: ALL_FILTER, label: "All tiers" }, ...TIER_OPTIONS]}
+              className="w-full sm:w-36"
+              selectClassName="py-1.5 text-xs"
+            />
+            {isFiltered && (
+              <Button
+                size="sm"
+                variant="ghost"
+                icon="filter_alt_off"
+                onClick={() => { setRegionFilter(ALL_FILTER); setTierFilter(ALL_FILTER); }}
+              >
+                Reset
+              </Button>
+            )}
+          </div>
         </div>
 
         {(selectedIds.length > 0 || healthChecking) && (
@@ -696,9 +767,23 @@ export default function ProxyPoolsPage() {
             </p>
             <Button icon="add" onClick={openCreateModal}>Add Proxy Pool</Button>
           </div>
+        ) : visiblePools.length === 0 ? (
+          <div className="text-center py-10">
+            <p className="text-text-main font-medium mb-1">No pools match the current filter</p>
+            <p className="text-sm text-text-muted mb-4">
+              Try a different region or tier combination.
+            </p>
+            <Button
+              variant="secondary"
+              icon="filter_alt_off"
+              onClick={() => { setRegionFilter(ALL_FILTER); setTierFilter(ALL_FILTER); }}
+            >
+              Reset filters
+            </Button>
+          </div>
         ) : (
           <div className="flex flex-col divide-y divide-black/[0.04] dark:divide-white/[0.05]">
-            {proxyPools.map((pool) => (
+            {visiblePools.map((pool) => (
               <div key={pool.id} className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-start gap-3 min-w-0 flex-1">
                   <input
@@ -722,6 +807,8 @@ export default function ProxyPoolsPage() {
                     {pool.type === "cloudflare" && (
                       <Badge variant="default" size="sm">cloudflare relay</Badge>
                     )}
+                    <Badge variant="default" size="sm">{regionLabel(pool.region)}</Badge>
+                    <Badge variant={getTierVariant(pool.tier)} size="sm">{tierLabel(pool.tier)}</Badge>
                     <Badge variant="default" size="sm">
                       {pool.boundConnectionCount || 0} bound
                     </Badge>
@@ -1009,6 +1096,25 @@ export default function ProxyPoolsPage() {
             placeholder="localhost,127.0.0.1,.internal"
             hint="Comma-separated hosts/domains to bypass proxy"
           />
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Select
+              label="Region"
+              value={formData.region}
+              onChange={(e) => setFormData((prev) => ({ ...prev, region: e.target.value }))}
+              options={REGION_OPTIONS}
+              hint="Global pools match any requested region"
+              disabled={saving}
+            />
+            <Select
+              label="Tier"
+              value={formData.tier}
+              onChange={(e) => setFormData((prev) => ({ ...prev, tier: e.target.value }))}
+              options={TIER_OPTIONS}
+              hint="Quality class used for minimum-tier matching"
+              disabled={saving}
+            />
+          </div>
 
           <div className="flex flex-col gap-3 rounded-lg border border-border/50 p-3 sm:flex-row sm:items-center sm:justify-between">
             <div>

@@ -5,8 +5,10 @@ import PropTypes from "prop-types";
 import Card from "./Card";
 import Select from "./Select";
 import Badge from "./Badge";
+import { PROXY_REGIONS, PROXY_TIERS } from "@/shared/constants/proxyPoolMeta";
 
 const NONE_PROXY_POOL_VALUE = "__none__";
+const ANY_VALUE = "__any__";
 const STRATEGIES = [
   { value: "none", label: "None (single pool)" },
   { value: "round-robin", label: "Round-robin" },
@@ -17,6 +19,8 @@ export default function NoAuthProxyCard({ providerId }) {
   const [proxyPools, setProxyPools] = useState([]);
   const [proxyPoolId, setProxyPoolId] = useState(NONE_PROXY_POOL_VALUE);
   const [rotateStrategy, setRotateStrategy] = useState("none");
+  const [proxyRegion, setProxyRegion] = useState(ANY_VALUE);
+  const [proxyTier, setProxyTier] = useState(ANY_VALUE);
   const [saving, setSaving] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
 
@@ -31,11 +35,13 @@ export default function NoAuthProxyCard({ providerId }) {
       const override = (settingsData.providerStrategies || {})[providerId] || {};
       setProxyPoolId(override.proxyPoolId || NONE_PROXY_POOL_VALUE);
       setRotateStrategy(override.rotateStrategy || "none");
+      setProxyRegion(override.proxyRegion || ANY_VALUE);
+      setProxyTier(override.proxyTier || ANY_VALUE);
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [providerId]);
 
-  const save = useCallback(async (poolId, strategy) => {
+  const save = useCallback(async (poolId, strategy, region, tier) => {
     setSaving(true);
     try {
       const res = await fetch("/api/settings", { cache: "no-store" });
@@ -46,6 +52,12 @@ export default function NoAuthProxyCard({ providerId }) {
       else override.proxyPoolId = poolId;
       if (strategy === "none") delete override.rotateStrategy;
       else override.rotateStrategy = strategy;
+      // Absent key means "no preference"; storing the sentinel would make the
+      // runtime selector filter against a region id that does not exist.
+      if (region === ANY_VALUE) delete override.proxyRegion;
+      else override.proxyRegion = region;
+      if (tier === ANY_VALUE) delete override.proxyTier;
+      else override.proxyTier = tier;
       const updated = { ...current };
       if (Object.keys(override).length === 0) delete updated[providerId];
       else updated[providerId] = override;
@@ -65,16 +77,27 @@ export default function NoAuthProxyCard({ providerId }) {
 
   const handlePoolChange = (newPoolId) => {
     setProxyPoolId(newPoolId);
-    save(newPoolId, rotateStrategy);
+    save(newPoolId, rotateStrategy, proxyRegion, proxyTier);
   };
 
   const handleStrategyChange = (newStrategy) => {
     setRotateStrategy(newStrategy);
-    save(proxyPoolId, newStrategy);
+    save(proxyPoolId, newStrategy, proxyRegion, proxyTier);
+  };
+
+  const handleRegionChange = (newRegion) => {
+    setProxyRegion(newRegion);
+    save(proxyPoolId, rotateStrategy, newRegion, proxyTier);
+  };
+
+  const handleTierChange = (newTier) => {
+    setProxyTier(newTier);
+    save(proxyPoolId, rotateStrategy, proxyRegion, newTier);
   };
 
   const canRotate = proxyPools.length >= 2;
   const isRotation = rotateStrategy !== "none";
+  const hasPreference = proxyRegion !== ANY_VALUE || proxyTier !== ANY_VALUE;
 
   return (
     <Card>
@@ -93,13 +116,44 @@ export default function NoAuthProxyCard({ providerId }) {
         label="Proxy Pool"
         value={proxyPoolId}
         onChange={(e) => handlePoolChange(e.target.value)}
-        disabled={saving || isRotation}
+        disabled={saving || isRotation || hasPreference}
         options={[
           { value: NONE_PROXY_POOL_VALUE, label: "None (direct)" },
           ...proxyPools.map((pool) => ({ value: pool.id, label: pool.name })),
         ]}
-        hint={isRotation ? "Pool selector is ignored when rotation is active — all active pools are used." : undefined}
+        hint={
+          isRotation
+            ? "Pool selector is ignored when rotation is active — all active pools are used."
+            : hasPreference
+              ? "Pool selector is ignored while a region or tier preference is set — pools are matched automatically."
+              : undefined
+        }
       />
+
+      <div className="grid grid-cols-1 gap-4 mt-4 sm:grid-cols-2">
+        <Select
+          label="Preferred Region"
+          value={proxyRegion}
+          onChange={(e) => handleRegionChange(e.target.value)}
+          disabled={saving}
+          options={[
+            { value: ANY_VALUE, label: "Any region" },
+            ...PROXY_REGIONS.map((r) => ({ value: r.id, label: r.label })),
+          ]}
+          hint="Global pools always qualify"
+        />
+        <Select
+          label="Minimum Tier"
+          value={proxyTier}
+          onChange={(e) => handleTierChange(e.target.value)}
+          disabled={saving}
+          options={[
+            { value: ANY_VALUE, label: "Any tier" },
+            ...PROXY_TIERS.map((t) => ({ value: t.id, label: `${t.label} or better` })),
+          ]}
+          hint="Falls back to lower tiers if none match"
+        />
+      </div>
 
       <div className="flex flex-col gap-2 mt-4">
         <label className="text-sm font-medium text-text-main">Rotation Strategy</label>

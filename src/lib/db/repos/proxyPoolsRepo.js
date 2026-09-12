@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
+import { normalizeRegion, normalizeTier } from "@/shared/constants/proxyPoolMeta";
 
 function rowToPool(row) {
   if (!row) return null;
@@ -10,6 +11,10 @@ function rowToPool(row) {
     id: row.id,
     isActive: row.isActive === 1 || row.isActive === true,
     testStatus: row.testStatus,
+    // Pools created before region/tier existed carry no value in the JSON
+    // column; normalizing on read keeps every consumer free of null checks.
+    region: normalizeRegion(extra.region),
+    tier: normalizeTier(extra.tier),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -65,6 +70,8 @@ export async function createProxyPool(data) {
     proxyUrl: data.proxyUrl,
     noProxy: data.noProxy || "",
     type: data.type || "http",
+    region: normalizeRegion(data.region),
+    tier: normalizeTier(data.tier),
     isActive: data.isActive !== undefined ? data.isActive : true,
     strictProxy: data.strictProxy === true,
     testStatus: data.testStatus || "unknown",

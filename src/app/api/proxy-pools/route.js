@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createProxyPool, getProviderConnections, getProxyPools } from "@/models";
+import { normalizeRegion, normalizeTier } from "@/shared/constants/proxyPoolMeta";
 
 function toBoolean(value) {
   if (value === "true") return true;
@@ -15,6 +16,10 @@ function normalizeProxyPoolInput(body = {}) {
   const noProxy = typeof body?.noProxy === "string" ? body.noProxy.trim() : "";
   const isActive = body?.isActive === undefined ? true : body.isActive === true;
   const strictProxy = body?.strictProxy === true;
+  // Unknown region/tier values coerce to defaults rather than rejecting, so
+  // batch imports and older clients that omit them keep succeeding.
+  const region = normalizeRegion(body?.region);
+  const tier = normalizeTier(body?.tier);
   let type = VALID_PROXY_TYPES.includes(body?.type) ? body.type : "http";
 
   if (type === "http" && proxyUrl) {
@@ -31,7 +36,7 @@ function normalizeProxyPoolInput(body = {}) {
     return { error: "Proxy URL is required" };
   }
 
-  return { name, proxyUrl, noProxy, isActive, strictProxy, type };
+  return { name, proxyUrl, noProxy, isActive, strictProxy, type, region, tier };
 }
 
 function buildUsageMap(connections = []) {
@@ -53,13 +58,24 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const isActive = toBoolean(searchParams.get("isActive"));
     const includeUsage = searchParams.get("includeUsage") === "true";
+    const region = searchParams.get("region");
+    const tier = searchParams.get("tier");
 
     const filter = {};
     if (isActive !== undefined) {
       filter.isActive = isActive;
     }
 
-    const proxyPools = await getProxyPools(filter);
+    let proxyPools = await getProxyPools(filter);
+
+    // region/tier live inside the JSON `data` column, so they can't be pushed
+    // into the SQL WHERE clause and are filtered here instead.
+    if (region) {
+      proxyPools = proxyPools.filter((pool) => pool.region === region);
+    }
+    if (tier) {
+      proxyPools = proxyPools.filter((pool) => pool.tier === tier);
+    }
 
     if (!includeUsage) {
       return NextResponse.json({ proxyPools });

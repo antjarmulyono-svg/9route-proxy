@@ -5,6 +5,7 @@ import {
   getProxyPoolById,
   updateProxyPool,
 } from "@/models";
+import { normalizeRegion, normalizeTier } from "@/shared/constants/proxyPoolMeta";
 
 function normalizeProxyPoolUpdate(body = {}) {
   const updates = {};
@@ -42,8 +43,18 @@ function normalizeProxyPoolUpdate(body = {}) {
     updates.strictProxy = body?.strictProxy === true;
   }
 
+  if (Object.prototype.hasOwnProperty.call(body, "region")) {
+    updates.region = normalizeRegion(body?.region);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "tier")) {
+    updates.tier = normalizeTier(body?.tier);
+  }
+
   if (Object.prototype.hasOwnProperty.call(body, "type")) {
-    const validTypes = ["http", "vercel", "cloudflare"];
+    // "deno" was missing here, so editing any field on a Deno relay pool
+    // silently downgraded its type to "http" and broke relay resolution.
+    const validTypes = ["http", "vercel", "cloudflare", "deno"];
     updates.type = validTypes.includes(body?.type) ? body.type : "http";
   }
 

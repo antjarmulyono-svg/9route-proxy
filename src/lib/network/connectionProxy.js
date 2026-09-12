@@ -1,4 +1,5 @@
 import { getProxyPoolById } from "@/models";
+import { normalizeRegion, tierRank } from "@/shared/constants/proxyPoolMeta";
 
 // Safely normalize any value into a trimmed string.
 function normalizeString(value) {
@@ -10,12 +11,12 @@ function normalizeString(value) {
 const rotateState = new Map(); // providerId → { index }
 
 /**
- * Pick one proxy pool ID from a list based on strategy.
+ * Apply the rotation strategy across an already-filtered candidate list.
  * round-robin: cycle sequentially (in-memory, resets on restart)
  * random:      uniform random pick
  * none/single: return first entry
  */
-export function pickProxyPoolId(poolIds, strategy, providerId) {
+function applyStrategy(poolIds, strategy, providerId) {
   if (!poolIds || poolIds.length === 0) return null;
   if (poolIds.length === 1) return poolIds[0];
 
@@ -31,6 +32,65 @@ export function pickProxyPoolId(poolIds, strategy, providerId) {
   }
 
   return poolIds[0]; // "none" or unknown
+}
+
+/**
+ * Pick one proxy pool ID from a list based on strategy.
+ * Kept for callers that rotate over a pre-built id list with no geo/quality
+ * preference; region/tier-aware callers should use selectProxyPool instead.
+ */
+export function pickProxyPoolId(poolIds, strategy, providerId) {
+  return applyStrategy(poolIds, strategy, providerId);
+}
+
+/**
+ * Select a proxy pool honouring region and minimum-tier preferences.
+ *
+ * Matching is graded rather than strict: a request for `ap-southeast` +
+ * `premium` that finds nothing must still be routed, so the filters are
+ * relaxed one at a time (tier first, then region) before giving up on
+ * preferences entirely. Failing closed here would turn a missing pool into a
+ * hard request failure, which is worse than routing through a less ideal exit.
+ *
+ * @param {Array} pools            candidate pools (any active state)
+ * @param {object} options
+ * @param {string} [options.region] preferred region id
+ * @param {string} [options.tier]   minimum acceptable tier id
+ * @param {string} [options.strategy] rotation strategy within the matches
+ * @param {string} [options.providerId] rotation bucket key
+ * @returns {string|null} chosen pool id
+ */
+export function selectProxyPool(pools, options = {}) {
+  const { region, tier, strategy = "none", providerId = "" } = options;
+
+  // A pool without a URL cannot carry traffic regardless of its metadata.
+  const usable = (pools || []).filter(
+    (pool) => pool && pool.isActive === true && normalizeString(pool.proxyUrl)
+  );
+  if (usable.length === 0) return null;
+
+  const wantedRegion = normalizeString(region);
+  const wantedTier = normalizeString(tier);
+  const minRank = wantedTier ? tierRank(wantedTier) : null;
+
+  // A "global" pool is an anycast/edge exit with no fixed geography, so it is
+  // a valid candidate for every requested region.
+  const matchesRegion = (pool) =>
+    !wantedRegion ||
+    normalizeRegion(pool.region) === wantedRegion ||
+    normalizeRegion(pool.region) === "global";
+
+  const matchesTier = (pool) => minRank === null || tierRank(pool.tier) >= minRank;
+
+  const tiers = [
+    usable.filter((pool) => matchesRegion(pool) && matchesTier(pool)),
+    usable.filter(matchesRegion), // relax tier
+    usable.filter(matchesTier), // relax region
+    usable, // relax everything
+  ];
+
+  const candidates = tiers.find((list) => list.length > 0) || [];
+  return applyStrategy(candidates.map((pool) => pool.id), strategy, providerId);
 }
 
 /**
