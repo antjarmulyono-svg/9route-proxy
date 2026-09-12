@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createProxyPool } from "@/models";
+import { detectRelayRegion } from "@/lib/network/relayRegion";
 
 // Relay worker source code deployed to Cloudflare
 const RELAY_WORKER_CODE = `
@@ -127,6 +128,10 @@ export async function POST(request) {
       );
     }
 
+    // Ask the relay which colo answered, so the pool lands in the right region
+    // instead of defaulting to global and needing a manual correction.
+    const { region, detected, edge } = await detectRelayRegion(deployUrl);
+
     // Create proxy pool entry with type cloudflare
     const proxyPool = await createProxyPool({
       name: projectName,
@@ -135,9 +140,13 @@ export async function POST(request) {
       noProxy: "",
       isActive: true,
       strictProxy: false,
+      region,
     });
 
-    return NextResponse.json({ proxyPool, deployUrl }, { status: 201 });
+    return NextResponse.json(
+      { proxyPool, deployUrl, region, regionDetected: detected, edge },
+      { status: 201 }
+    );
   } catch (error) {
     console.log("Error deploying Cloudflare relay:", error);
     return NextResponse.json({ error: error.message || "Deploy failed" }, { status: 500 });

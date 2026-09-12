@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createProxyPool } from "@/models";
+import { detectRelayRegion } from "@/lib/network/relayRegion";
 
 const DENO_V2_API = "https://api.deno.com/v2";
 
@@ -158,6 +159,10 @@ export async function POST(request) {
     const deployUrl = `https://${projectName}.${orgSlug}.deno.net`;
     console.log("Deno deployUrl:", deployUrl);
 
+    // Ask the relay which GCP region answered, so the pool lands in the right
+    // region instead of defaulting to global and needing a manual correction.
+    const { region, detected, edge } = await detectRelayRegion(deployUrl);
+
     const proxyPool = await createProxyPool({
       name: projectName,
       proxyUrl: deployUrl,
@@ -165,9 +170,13 @@ export async function POST(request) {
       noProxy: "",
       isActive: true,
       strictProxy: false,
+      region,
     });
 
-    return NextResponse.json({ proxyPool, deployUrl }, { status: 201 });
+    return NextResponse.json(
+      { proxyPool, deployUrl, region, regionDetected: detected, edge },
+      { status: 201 }
+    );
   } catch (error) {
     console.log("Error deploying Deno Deploy relay:", error);
     return NextResponse.json({ error: error.message || "Deploy failed" }, { status: 500 });

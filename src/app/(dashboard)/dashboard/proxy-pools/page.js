@@ -413,6 +413,17 @@ export default function ProxyPoolsPage() {
     setShowDenoModal(false);
   };
 
+  // The relay's region is probed server-side after deploy. Surface it here so
+  // the operator can see which edge answered without opening the pool, and say
+  // so plainly when detection failed rather than implying "global" was measured.
+  const deployMessage = (data) => {
+    const base = `Deployed: ${data.deployUrl}`;
+    if (data.regionDetected) {
+      return `${base} — region ${regionLabel(data.region)}${data.edge ? ` (${data.edge})` : ""}`;
+    }
+    return `${base} — region undetected, defaulted to Global`;
+  };
+
   const handleVercelDeploy = async () => {
     if (!vercelForm.vercelToken.trim()) return;
     setDeploying(true);
@@ -426,7 +437,7 @@ export default function ProxyPoolsPage() {
       if (res.ok) {
         await fetchProxyPools();
         closeVercelModal();
-        notify.success(`Deployed: ${data.deployUrl}`);
+        notify.success(deployMessage(data));
       } else {
         notify.error(data.error || "Deploy failed");
       }
@@ -451,7 +462,7 @@ export default function ProxyPoolsPage() {
       if (res.ok) {
         await fetchProxyPools();
         closeCloudflareModal();
-        notify.success(`Deployed: ${data.deployUrl}`);
+        notify.success(deployMessage(data));
       } else {
         notify.error(data.error || "Deploy failed");
       }
@@ -476,7 +487,7 @@ export default function ProxyPoolsPage() {
       if (res.ok) {
         await fetchProxyPools();
         closeDenoModal();
-        notify.success(`Deployed: ${data.deployUrl}`);
+        notify.success(deployMessage(data));
       } else {
         notify.error(data.error || "Deploy failed");
       }
