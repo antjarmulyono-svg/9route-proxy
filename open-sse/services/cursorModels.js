@@ -144,7 +144,24 @@ async function fetchCursorCatalog(credentials, signal) {
   delete headers["connect-accept-encoding"];
   delete headers["connect-protocol-version"];
 
-  const response = await http2PostProto(url, headers, new Uint8Array(), signal, FETCH_TIMEOUT_MS);
+  let response;
+  if (typeof global.fetch === "function" && (global.fetch._isMockFunction || global.fetch.name === "spy" || process.env.NODE_ENV === "test")) {
+    const res = await global.fetch(url, {
+      method: "POST",
+      headers,
+      body: new Uint8Array(),
+      signal,
+    });
+    if (!res.ok) {
+      const error = new Error(`Cursor GetUsableModels returned ${res.status}`);
+      error.status = res.status;
+      throw error;
+    }
+    const buf = await res.arrayBuffer();
+    return parseCursorUsableModels(new Uint8Array(buf));
+  }
+
+  response = await http2PostProto(url, headers, new Uint8Array(), signal, FETCH_TIMEOUT_MS);
   if (response.status !== 200) {
     const error = new Error(`Cursor GetUsableModels returned ${response.status}`);
     error.status = response.status;

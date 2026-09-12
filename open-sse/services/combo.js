@@ -74,9 +74,12 @@ export function reorderByCapabilities(models, required) {
     return soft.every((c) => caps[c] === true) ? 0 : 1;
   };
 
+  const scored = models.map((m, i) => ({ m, i, t: tierOf(m) }));
+  const firstTier = scored[0].t;
+  if (scored.every((x) => x.t === firstTier)) return models;
+
   // Stable sort by tier (Array.prototype.sort is stable in modern engines).
-  return models
-    .map((m, i) => ({ m, i, t: tierOf(m) }))
+  return scored
     .sort((a, b) => a.t - b.t || a.i - b.i)
     .map((x) => x.m);
 }
@@ -178,7 +181,14 @@ export function detectRequiredCapabilities(body) {
   const contents = body.contents || body.request?.contents;                      // gemini / antigravity
   for (const c of trailingUserItems(contents)) scanContent(c.parts);
 
-  // search: temporarily disabled in auto-switch (feature not wired yet).
+  // search: detect web_search / search tools
+  if (Array.isArray(body.tools)) {
+    for (const t of body.tools) {
+      if (t?.type === "web_search" || t?.type === "search" || t?.function?.name === "web_search") {
+        required.add("search");
+      }
+    }
+  }
 
   return required;
 }

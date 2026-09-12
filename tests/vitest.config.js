@@ -5,10 +5,11 @@ import { fileURLToPath } from "url";
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
 export default defineConfig({
+  root: resolve(__dirname, ".."),
   test: {
     environment: "node",
     globals: true,
-    include: ["**/*.test.js"],
+    include: ["tests/**/*.test.js"],
     // Don't scan into git worktrees nested under .claude/ — they carry their
     // own copies of the test files but lack an installed node_modules (open-sse,
     // etc.), which makes provider imports fail during collection.

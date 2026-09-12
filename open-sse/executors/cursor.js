@@ -7,7 +7,8 @@ import {
   wrapConnectRPCFrame,
   decodeMessage,
   parseConnectRPCFrame,
-  extractTextFromResponse
+  extractTextFromResponse,
+  encodeMcpTools
 } from "../utils/cursorProtobuf.js";
 import { buildCursorHeaders } from "../utils/cursorChecksum.js";
 import { estimateUsage } from "../utils/usageTracking.js";
@@ -70,6 +71,18 @@ function textFromContent(content) {
     .join("\n");
 }
 
+export function isAgentCapableRequest(body) {
+  if (!body || !Array.isArray(body.messages) || body.messages.length === 0) return false;
+  for (const m of body.messages) {
+    if (Array.isArray(m.content)) {
+      for (const part of m.content) {
+        if (part?.type && part.type !== "text") return false;
+      }
+    }
+  }
+  return true;
+}
+
 function isAgentTextRequest(body) {
   // Many compatible clients always attach their built-in tool schemas, even
   // for a normal text turn. Cursor's retired ChatService rejects those
@@ -84,7 +97,13 @@ function isAgentTextRequest(body) {
 }
 
 function encodeHistoryMessage(message) {
-  const content = textFromContent(message?.content);
+  let content = textFromContent(message?.content);
+  if (!content && message?.tool_calls?.length) {
+    content = message.tool_calls.map((tc) => `${tc?.function?.name || "tool"}(${tc?.function?.arguments || ""})`).join("\n");
+  }
+  if (!content && message?.role === "tool") {
+    content = typeof message?.content === "string" ? message.content : "";
+  }
   if (!content) return null;
 
   // ConversationHistoryMessage.user / .assistant -> repeated content -> text.
@@ -95,7 +114,7 @@ function encodeHistoryMessage(message) {
   return agentMessage(1, agentMessage(1, agentMessage(1, text)));
 }
 
-function buildAgentRunFrame(messages, model) {
+export function buildAgentRunFrame(messages, model, tools = []) {
   const system = messages
     .filter((message) => message?.role === "system")
     .map((message) => textFromContent(message.content))
@@ -124,10 +143,12 @@ function buildAgentRunFrame(messages, model) {
   );
   const conversationAction = agentMessage(1, userAction);
   const requestedModel = concatBuffers(agentString(1, model), agentBool(7, true));
+  const mcpToolsBytes = tools && tools.length > 0 ? encodeMcpTools(tools) : null;
   const runRequest = concatBuffers(
     // An empty ConversationStateStructure starts a fresh local agent session.
     agentMessage(1, new Uint8Array()),
     agentMessage(2, conversationAction),
+    ...(mcpToolsBytes && mcpToolsBytes.length > 0 ? [agentMessage(4, mcpToolsBytes)] : []),
     ...(system ? [agentString(8, system)] : []),
     agentMessage(9, requestedModel),
   );
