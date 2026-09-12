@@ -199,11 +199,20 @@ async function canAccessPublicLlmApi(request) {
 
 async function canAccessLocalOnlyRoute(request) {
   if (await hasValidCliToken(request)) return true;
-  // Loopback is necessary but NOT sufficient. These routes spawn child processes
-  // and read host secrets, so being local only earns the right to authenticate —
-  // it does not replace authentication. Any browser page on the machine can issue
-  // a loopback request, so treating locality alone as proof would hand those
-  // routes to any tab the user happens to open.
+
+  // A proven dashboard session is a real credential, so it is accepted from any
+  // address. The same JWT already authorises /api/shutdown and /api/version/update,
+  // which reach the host just as far. Demanding loopback on top of it locks out every
+  // dashboard served on a LAN address or from inside a container, where the peer IP is
+  // the bridge gateway and can never be 127.0.0.1. Deliberately hasValidToken and not
+  // isAuthenticated: isAuthenticated is also true when requireLogin is off, which is
+  // no credential at all.
+  if (await hasValidToken(request)) return true;
+
+  // No session cookie. Loopback is then necessary but NOT sufficient — it only earns
+  // the right to whatever the requireLogin setting counts as authenticated. Locality
+  // alone never opens these routes (GHSA-pjm4-8fpg-f9p6), because any browser page on
+  // the machine can issue a loopback request.
   return isLocalRequest(request) && (await isAuthenticated(request));
 }
 

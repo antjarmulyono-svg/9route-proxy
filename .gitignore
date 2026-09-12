@@ -89,3 +89,4 @@ graphify-out/*
 
 # Test gate output (npm run test:gate)
 .test-results.json
+backups/

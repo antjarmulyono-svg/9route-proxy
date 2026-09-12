@@ -17,6 +17,17 @@
 - **CLI**: `9router gemini video --prompt "…" --output video.mp4` (also
   `9router google video` / `9router veo`), mirroring `9router xai video`
 
+## Fixes
+- **Security**: local-only routes accept a proven dashboard session from any
+  address again. The GHSA-pjm4-8fpg-f9p6 fix required loopback *and*
+  authentication, which no containerised or LAN-served dashboard can satisfy:
+  the peer IP is the bridge gateway or a `10.x` client, never `127.0.0.1`. MITM,
+  MCP and the tunnel routes answered `403 Local only: CLI token required`, and
+  the MITM card rendered its error fallback as a missing CA certificate plus a
+  spurious sudo prompt. The session check uses `hasValidToken` rather than
+  `isAuthenticated`, so `requireLogin: false` is no longer a remote credential —
+  stricter than the code that shipped before the advisory fix
+
 # v0.5.59 (2026-08-29)
 
 ## Features

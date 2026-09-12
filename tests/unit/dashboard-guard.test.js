@@ -266,6 +266,55 @@ describe("dashboard guard local-only access", () => {
 
     expect(response).toBe(mocks.nextResponse);
   });
+
+  // A dashboard served on a LAN address, or from a container where the peer IP is the
+  // bridge gateway, can never present a loopback peer. A proven session is the
+  // credential there; the same JWT already opens /api/shutdown and /api/version/update.
+  it("allows local-only route from a LAN address with a proven dashboard session", async () => {
+    mocks.verifyDashboardAuthToken.mockResolvedValue(true);
+
+    const req = request("/api/cli-tools/antigravity-mitm", {
+      host: "10.10.123.206:20128",
+      origin: "http://10.10.123.206:20128",
+      "x-9r-peer-token": PEER_TOKEN,
+      "x-9r-real-ip": "172.19.0.1",
+    });
+    req.cookies.get = vi.fn(() => ({ value: "signed-jwt" }));
+
+    const response = await proxy(req);
+
+    expect(response).toBe(mocks.nextResponse);
+  });
+
+  it("rejects a LAN local-only request whose session cookie does not verify", async () => {
+    mocks.verifyDashboardAuthToken.mockResolvedValue(false);
+
+    const req = request("/api/cli-tools/antigravity-mitm", {
+      host: "10.10.123.206:20128",
+      "x-9r-peer-token": PEER_TOKEN,
+      "x-9r-real-ip": "172.19.0.1",
+    });
+    req.cookies.get = vi.fn(() => ({ value: "forged-jwt" }));
+
+    const response = await proxy(req);
+
+    expect(response.status).toBe(403);
+    expect(response.body.error).toBe("Local only: CLI token required");
+  });
+
+  // requireLogin=false must not become a remote credential: it is only honoured
+  // alongside a genuine loopback peer.
+  it("rejects a remote local-only request when requireLogin=false and no session exists", async () => {
+    mocks.getSettings.mockResolvedValue({ requireLogin: false });
+
+    const response = await proxy(request("/api/cli-tools/antigravity-mitm", {
+      host: "10.10.123.206:20128",
+      "x-9r-peer-token": PEER_TOKEN,
+      "x-9r-real-ip": "10.10.123.143",
+    }));
+
+    expect(response.status).toBe(403);
+  });
 });
 
 describe("dashboard guard helpers", () => {
