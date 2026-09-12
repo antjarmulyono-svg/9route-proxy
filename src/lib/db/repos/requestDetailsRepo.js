@@ -10,6 +10,11 @@ const CONFIG_CACHE_TTL_MS = 5000;
 let cachedConfig = null;
 let cachedConfigTs = 0;
 
+export function invalidateObservabilityConfig() {
+  cachedConfig = null;
+  cachedConfigTs = 0;
+}
+
 async function getObservabilityConfig() {
   if (cachedConfig && (Date.now() - cachedConfigTs) < CONFIG_CACHE_TTL_MS) return cachedConfig;
   try {
@@ -160,6 +165,7 @@ export async function saveRequestDetail(detail) {
 }
 
 export async function getRequestDetails(filter = {}) {
+  if (writeBuffer.length > 0) await flushToDatabase();
   const db = await getAdapter();
   const conds = [];
   const params = [];
@@ -193,15 +199,22 @@ export async function getRequestDetails(filter = {}) {
 }
 
 export async function getDistinctProviders() {
+  if (writeBuffer.length > 0) await flushToDatabase();
   const db = await getAdapter();
   const rows = db.all(`SELECT DISTINCT provider FROM requestDetails WHERE provider IS NOT NULL ORDER BY provider ASC`);
   return rows.map((r) => r.provider);
 }
 
 export async function getRequestDetailById(id) {
+  if (writeBuffer.length > 0) await flushToDatabase();
   const db = await getAdapter();
   const row = db.get(`SELECT data FROM requestDetails WHERE id = ?`, [id]);
   return row ? parseJson(row.data, null) : null;
+}
+
+export async function flushRequestDetails() {
+  if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+  await flushToDatabase();
 }
 
 const _shutdownHandler = async () => {

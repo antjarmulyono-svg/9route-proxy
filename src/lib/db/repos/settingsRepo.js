@@ -107,6 +107,10 @@ export async function updateSettings(updates) {
       [stringifyJson(next)],
     );
   });
+  try {
+    const { invalidateObservabilityConfig } = await import("./requestDetailsRepo.js");
+    invalidateObservabilityConfig();
+  } catch {}
   return mergeWithDefaults(next);
 }
 

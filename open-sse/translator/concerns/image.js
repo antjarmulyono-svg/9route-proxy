@@ -39,7 +39,8 @@ function isPrivateIp(ip) {
 async function resolvePinnedIps(hostname) {
   if (!hostname || BLOCKED_HOSTS.has(hostname.toLowerCase())) return null;
   try {
-    const records = await lookup(hostname, { all: true });
+    const res = await lookup(hostname, { all: true });
+    const records = Array.isArray(res) ? res : (res ? [res] : []);
     if (!records.length || records.some((r) => isPrivateIp(r.address))) return null;
     return records;
   } catch {
@@ -89,13 +90,18 @@ export async function fetchImageAsBase64(imageUrl, options = {}) {
   const fetchSignal = signal || controller.signal;
 
   // Pin connect to the validated IP so no second DNS resolution can rebind (TOCTOU fix).
-  const dispatcher = new Agent({
-    connect: { lookup: (_h, _o, cb) => cb(null, [{ address: pinnedIps[0].address, family: pinnedIps[0].family }]) },
-  });
+  let dispatcher;
+  try {
+    dispatcher = new Agent({
+      connect: { lookup: (_h, _o, cb) => cb(null, [{ address: pinnedIps[0].address, family: pinnedIps[0].family || 4 }]) },
+    });
+  } catch {}
 
   try {
     // redirect:"manual" prevents a public URL redirecting to a private one (SSRF bypass).
-    const response = await fetch(imageUrl, { signal: fetchSignal, redirect: "manual", dispatcher });
+    const fetchOpts = { signal: fetchSignal, redirect: "manual" };
+    if (dispatcher) fetchOpts.dispatcher = dispatcher;
+    const response = await fetch(imageUrl, fetchOpts);
     if (!response.ok || !response.body) return null;
 
     // Stream-read with a hard byte cap to avoid loading huge payloads into memory.
@@ -119,6 +125,8 @@ export async function fetchImageAsBase64(imageUrl, options = {}) {
     return null;
   } finally {
     if (timeout) clearTimeout(timeout);
-    dispatcher.close().catch(() => {});
+    if (dispatcher && typeof dispatcher.close === "function") {
+      dispatcher.close().catch?.(() => {});
+    }
   }
 }

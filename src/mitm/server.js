@@ -140,37 +140,63 @@ async function passthrough(req, res, bodyBuffer, onResponse) {
     headersForForwarding["content-length"] = String(bodyForForwarding.length);
   }
 
-  // ALPN negotiate: try HTTP/2 first (like browsers/mitmweb), fallback HTTP/1.1
+  // ALPN negotiate: try HTTP/2 first (like browsers/mitmweb), fallback HTTP/1.1.
+  // negotiateAlpn resolves (never rejects) on probe failure — this catch only
+  // fires when DNS resolution itself fails.
   try {
     const proto = await negotiateAlpn(targetHost);
     if (proto === "h2") {
       return await passthroughHttp2(req, res, bodyForForwarding, headersForForwarding, targetHost, onResponse, dumper);
     }
   } catch (e) {
-    err(`[mitm] ALPN negotiate failed: ${e.message}, fallback to HTTP/1.1`);
+    err(`[mitm] ALPN host resolve failed for ${targetHost}: ${e.message}, fallback to HTTP/1.1`);
   }
 
   return passthroughHttps(req, res, bodyForForwarding, headersForForwarding, targetHost, onResponse, dumper);
 }
 
 // ── ALPN negotiation cache ────────────────────────────────────
-const alpnCache = new Map(); // host → "h2" | "http/1.1"
+// Cached both ways: a failed probe pins the host to "http/1.1" so we stop
+// re-probing (and re-logging) on every single request. Some upstreams —
+// googleapis in particular — reset the ALPN handshake outright while plain
+// HTTP/1.1 works fine. TTL lets h2 be re-detected if upstream behaviour changes.
+const ALPN_TTL_MS = 10 * 60 * 1000;
+const ALPN_NEGATIVE_TTL_MS = 30 * 60 * 1000;
+const alpnCache = new Map(); // host → { proto: "h2" | "http/1.1", ts, ok }
+
 async function negotiateAlpn(host) {
-  if (alpnCache.has(host)) return alpnCache.get(host);
+  const cached = alpnCache.get(host);
+  if (cached) {
+    const ttl = cached.ok ? ALPN_TTL_MS : ALPN_NEGATIVE_TTL_MS;
+    if (Date.now() - cached.ts < ttl) return cached.proto;
+  }
+
   const ip = await resolveTargetIP(host);
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
+    let settled = false;
+    const fallback = (reason) => {
+      if (settled) return;
+      settled = true;
+      alpnCache.set(host, { proto: "http/1.1", ts: Date.now(), ok: false });
+      log(`🔗 [mitm] ALPN ${host} → http/1.1 (probe failed: ${reason}, cached ${ALPN_NEGATIVE_TTL_MS / 60000}m)`);
+      resolve("http/1.1");
+    };
+
     const socket = tls.connect({
       host: ip, port: 443, servername: host,
       ALPNProtocols: ["h2", "http/1.1"], rejectUnauthorized: false,
     }, () => {
+      if (settled) return;
+      settled = true;
       const proto = socket.alpnProtocol || "http/1.1";
-      alpnCache.set(host, proto);
+      alpnCache.set(host, { proto, ts: Date.now(), ok: true });
       log(`🔗 [mitm] ALPN ${host} → ${proto}`);
       socket.end();
       resolve(proto);
     });
-    socket.once("error", reject);
-    socket.setTimeout(5000, () => { socket.destroy(new Error("ALPN timeout")); });
+
+    socket.once("error", (e) => { fallback(e.message); socket.destroy(); });
+    socket.setTimeout(5000, () => { fallback("timeout"); socket.destroy(); });
   });
 }
 
@@ -211,6 +237,11 @@ async function passthroughHttp2(req, res, bodyBuffer, headers, targetHost, onRes
 
     stream.once("response", (responseHeaders) => {
       const status = responseHeaders[":status"];
+      // Surface upstream failures — passthrough forwards these verbatim to the client,
+      // so without this log a 4xx/5xx from upstream leaves no trace at all.
+      if (status >= 400) {
+        err(`[mitm] passthrough h2 ${status} ${targetHost}${req.url.split("?")[0]}`);
+      }
       // Filter pseudo-headers + connection-specific
       const outHeaders = {};
       for (const [k, v] of Object.entries(responseHeaders)) {
@@ -258,6 +289,9 @@ async function passthroughHttps(req, res, bodyBuffer, headers, targetHost, onRes
     servername: targetHost,
     rejectUnauthorized: false
   }, (forwardRes) => {
+    if (forwardRes.statusCode >= 400) {
+      err(`[mitm] passthrough h1 ${forwardRes.statusCode} ${targetHost}${req.url.split("?")[0]}`);
+    }
     res.writeHead(forwardRes.statusCode, forwardRes.headers);
     if (dumper) dumper.writeHeader(forwardRes.statusCode, forwardRes.headers);
 

@@ -90,19 +90,44 @@ const LOCAL_ONLY_PATHS = [
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "0.0.0.0"]);
 
-// Accepts a Host header, a URL hostname or a raw socket address.
-// Allows loopback as well as private RFC1918 LAN networks (10.x.x.x, 172.16-31.x.x, 192.168.x.x).
-function isLoopbackHostname(h) {
-  if (!h) return false;
+// Strips brackets, a trailing :port and the IPv4-mapped IPv6 prefix so that the
+// many spellings of one address collapse to a single form. A dual-stack listener
+// reports loopback as ::ffff:127.0.0.1, and a bare ::1 carries several colons —
+// neither may be truncated by the port-stripping branch.
+function normalizeHostname(h) {
+  if (!h) return "";
   let name = String(h).trim().toLowerCase();
   if (name.startsWith("[")) {
     const end = name.indexOf("]");
-    if (end === -1) return false;
+    if (end === -1) return "";
     name = name.slice(1, end);
   } else if (name.indexOf(":") !== -1 && name.indexOf(":") === name.lastIndexOf(":")) {
     name = name.slice(0, name.indexOf(":"));
   }
   if (name.startsWith("::ffff:")) name = name.slice(7);
+  return name;
+}
+
+// Strict loopback — the machine itself, nothing else. This is the only test that
+// may gate a peer IP. `isLoopbackHostname` below deliberately also accepts RFC1918
+// LAN ranges, which is fine for a Host header but must never grant peer trust:
+// a caller from 10.x is a remote caller.
+function isStrictLoopback(h) {
+  const name = normalizeHostname(h);
+  if (!name) return false;
+  if (name === "localhost" || name === "::1") return true;
+  const parts = name.split(".").map(Number);
+  if (parts.length === 4 && parts.every((p) => !isNaN(p) && p >= 0 && p <= 255)) {
+    return parts[0] === 127;
+  }
+  return false;
+}
+
+// Accepts a Host header, a URL hostname or a raw socket address.
+// Allows loopback as well as private RFC1918 LAN networks (10.x.x.x, 172.16-31.x.x, 192.168.x.x).
+function isLoopbackHostname(h) {
+  const name = normalizeHostname(h);
+  if (!name) return false;
   if (LOOPBACK_HOSTS.has(name)) return true;
 
   const parts = name.split(".").map(Number);
@@ -116,12 +141,19 @@ function isLoopbackHostname(h) {
 }
 
 function isLoopbackPeer(request) {
+  // The only trustworthy signal: custom-server.js read the peer IP off the TCP
+  // socket and proved it by echoing its per-process secret.
   if (hasTrustedPeerHeaders(request)) {
-    const realIp = request.headers.get("x-9r-real-ip");
-    if (isLoopbackHostname(realIp)) return true;
+    return isStrictLoopback(request.headers.get("x-9r-real-ip"));
   }
-  const hostHeader = request.headers.get("host");
-  if (isLoopbackHostname(hostHeader)) return true;
+
+  // GHSA-pjm4-8fpg-f9p6 (#3294): `next start` leaves custom-server.js out of the
+  // request path, so nothing stamps the peer IP. Host is fully attacker-controlled,
+  // so falling back to it would let any remote caller claim to be loopback. Keep the
+  // convenience only in development, where `next dev` runs without the wrapper.
+  if (process.env.NODE_ENV === "development") {
+    return isLoopbackHostname(request.headers.get("host"));
+  }
   return false;
 }
 
@@ -167,9 +199,12 @@ async function canAccessPublicLlmApi(request) {
 
 async function canAccessLocalOnlyRoute(request) {
   if (await hasValidCliToken(request)) return true;
-  if (await isAuthenticated(request)) return true;
-  if (isLocalRequest(request)) return true;
-  return false;
+  // Loopback is necessary but NOT sufficient. These routes spawn child processes
+  // and read host secrets, so being local only earns the right to authenticate —
+  // it does not replace authentication. Any browser page on the machine can issue
+  // a loopback request, so treating locality alone as proof would hand those
+  // routes to any tab the user happens to open.
+  return isLocalRequest(request) && (await isAuthenticated(request));
 }
 
 async function hasValidToken(request) {
