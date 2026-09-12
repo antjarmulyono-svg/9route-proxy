@@ -1,0 +1,55 @@
+# Stack STAGING — terpisah penuh dari container produksi `9router`.
+#
+# Produksi memakai: container `9router`, port 20128 + 443, volume `9router-data`.
+# File ini TIDAK menyentuh satu pun dari itu. Semuanya diganti:
+#   container  9router          -> 9router-staging
+#   port       20128, 443       -> 20129 saja
+#   volume     9router-data     -> 9router-staging-data
+#   headroom   :8787            -> :8788
+#
+# Jalankan SELALU dengan -p agar Compose tidak menganggap ini stack yang sama:
+#   docker compose -p 9router-staging -f docker-compose.staging.yml up -d --build
+#   docker compose -p 9router-staging -f docker-compose.staging.yml down
+#
+# JANGAN jalankan `docker compose up` polos di direktori ini — perintah itu
+# membaca docker-compose.yml dan akan me-recreate container produksi.
+
+services:
+  9router-staging:
+    build: .
+    image: 9router:staging
+    container_name: 9router-staging
+    # `no`, bukan `always`: kalau staging mati, biarkan mati dan terlihat.
+    restart: "no"
+    ports:
+      - "0.0.0.0:20129:20129"
+      # TIDAK ada binding 443 — itu milik container produksi.
+    volumes:
+      - 9router-staging-data:/app/data
+    env_file:
+      - .env
+    environment:
+      # Override SETELAH env_file, jadi menimpa nilai dari .env.
+      PORT: "20129"
+      HOSTNAME: "0.0.0.0"
+      DATA_DIR: /app/data
+      NODE_ENV: production
+      HEADROOM_URL: http://headroom-staging:8787
+      # MITM dimatikan di staging: MITM mengikat :443 dan menulis ulang
+      # /etc/hosts milik host. Karena itu RUN_AS_ROOT dan NODE_EXTRA_CA_CERTS
+      # sengaja TIDAK diset di sini — proses tetap turun ke user `node`.
+      BASE_URL: http://localhost:20129
+      NEXT_PUBLIC_BASE_URL: http://localhost:20129
+    depends_on:
+      - headroom-staging
+
+  headroom-staging:
+    image: ghcr.io/chopratejas/headroom:latest
+    container_name: headroom-staging
+    restart: "no"
+    ports:
+      - "127.0.0.1:8788:8787"
+
+volumes:
+  9router-staging-data:
+    name: 9router-staging-data

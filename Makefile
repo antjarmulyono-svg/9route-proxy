@@ -1,8 +1,19 @@
-.PHONY: help install dev build start docker-up docker-down docker-logs docker-restart docker-build docker-update docker-rebuild docker-run clean
+.PHONY: help install dev build start docker-up docker-down docker-logs docker-restart docker-build docker-update docker-rebuild docker-run clean \
+	staging-up staging-down staging-logs staging-restart staging-rebuild staging-ps staging-shell staging-clean
 
 # Default configuration
 PORT ?= 20128
 BASE_URL ?= http://localhost:$(PORT)
+
+# --- Staging configuration ---
+# Stack staging TERPISAH dari produksi. Produksi memakai container `9router`
+# pada port 20128 + 443; staging memakai `9router-staging` pada 20129 saja.
+# -p dan -f WAJIB ikut di setiap perintah agar Compose tidak pernah
+# menyentuh stack produksi.
+STAGING_PROJECT ?= 9router-staging
+STAGING_FILE ?= docker-compose.staging.yml
+STAGING_PORT ?= 20129
+STAGING_COMPOSE = docker compose -p $(STAGING_PROJECT) -f $(STAGING_FILE)
 
 help: ## Tampilkan daftar perintah yang tersedia
 	@echo "========================================================"
@@ -54,6 +65,37 @@ docker-run: ## Build & jalankan single container docker 9router (standalone)
 	-docker rm 9router 2>/dev/null || true
 	docker build -t 9router .
 	docker run -d --name 9router -p $(PORT):$(PORT) --env-file .env -v 9router-data:/app/data 9router
+
+# --- Staging Commands (TIDAK menyentuh container produksi) ---
+
+staging-up: ## [STAGING] Build & jalankan stack staging di port 20129
+	$(STAGING_COMPOSE) up -d --build
+
+staging-down: ## [STAGING] Hentikan dan hapus container staging (volume tetap)
+	$(STAGING_COMPOSE) down
+
+staging-logs: ## [STAGING] Pantau log container staging
+	$(STAGING_COMPOSE) logs -f 9router-staging
+
+staging-restart: ## [STAGING] Restart container staging
+	$(STAGING_COMPOSE) restart
+
+staging-rebuild: ## [STAGING] Rebuild image staging dari nol (--no-cache) lalu jalankan
+	$(STAGING_COMPOSE) down
+	$(STAGING_COMPOSE) build --no-cache
+	$(STAGING_COMPOSE) up -d
+
+staging-ps: ## [STAGING] Status staging + pembanding container produksi
+	@$(STAGING_COMPOSE) ps
+	@echo ""
+	@echo "--- container produksi (harus tetap berjalan, uptime tidak berubah) ---"
+	@docker ps --filter name=^9router$$ --format '{{.Names}}\t{{.Status}}\t{{.Ports}}'
+
+staging-shell: ## [STAGING] Masuk ke shell container staging
+	$(STAGING_COMPOSE) exec 9router-staging sh
+
+staging-clean: ## [STAGING] Hapus container DAN volume data staging (destruktif, staging saja)
+	$(STAGING_COMPOSE) down -v
 
 clean: ## Bersihkan file build (.next, cache)
 	rm -rf .next
