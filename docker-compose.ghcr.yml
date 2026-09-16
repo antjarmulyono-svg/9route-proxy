@@ -1,0 +1,48 @@
+# Menjalankan 9Router dari image siap-pakai di GHCR — tanpa build lokal.
+#
+#   docker compose -f docker-compose.ghcr.yml up -d
+#
+# Bila package GHCR masih private, login sekali dulu di mesin ini:
+#   echo $GITHUB_PAT | docker login ghcr.io -u <username> --password-stdin
+#
+# Pin ke versi tertentu dengan mengganti tag, mis. NINEROUTER_TAG=main-a1b2c3d.
+
+services:
+  9router:
+    image: ghcr.io/antjarmulyono-svg/9route-proxy:${NINEROUTER_TAG:-latest}
+    container_name: 9router
+    restart: unless-stopped
+    ports:
+      - "${DASHBOARD_PORT:-20128}:20128"
+      # MITM. Port 443 kerap sudah dipakai host; timpa lewat MITM_PORT bila bentrok.
+      - "${MITM_PORT:-443}:443"
+    volumes:
+      - 9router-data:/app/data
+      - 9router-home:/app/data-home
+    environment:
+      # MITM mengikat :443 dan menulis /etc/hosts — keduanya butuh root, jadi
+      # lewati penurunan hak ke user `node`. Set hanya saat MITM dipakai.
+      RUN_AS_ROOT: "1"
+      # Dengan intersepsi DNS aktif, panggilan keluar router sendiri ikut jatuh ke
+      # MITM. Node abaikan CA store sistem, jadi tunjuk root CA secara eksplisit.
+      # Belum ada pada volume baru — Node memperingatkan, lalu normal setelah restart.
+      NODE_EXTRA_CA_CERTS: /app/data/mitm/rootCA.crt
+      DATA_DIR: /app/data
+      PORT: "20128"
+      HOSTNAME: "0.0.0.0"
+      NODE_ENV: production
+    healthcheck:
+      # node:alpine menyertakan wget (busybox), bukan curl.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:20128/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # Build Next standalone + migrasi DB awal butuh waktu; jangan tandai
+      # unhealthy selama masa pemanasan.
+      start_period: 40s
+
+volumes:
+  9router-data:
+    name: 9router-data
+  9router-home:
+    name: 9router-home

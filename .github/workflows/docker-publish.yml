@@ -2,12 +2,19 @@ name: Build and Push Docker Image
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*"
   workflow_dispatch:
 
+# Push beruntun ke branch yang sama: batalkan build lama, hemat menit Actions.
+# Build dari tag tidak pernah dibatalkan karena group-nya berbeda per-ref.
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
 env:
-  GHCR_IMAGE: ghcr.io/${{ github.repository }}
   DOCKERHUB_IMAGE: decolua/9router
 
 jobs:
@@ -20,6 +27,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # GHCR menolak huruf besar pada path image. Nama owner/repo tidak dijamin
+      # lowercase, jadi turunkan di sini alih-alih menghardcode.
+      - name: Resolve image names
+        id: names
+        run: |
+          echo "ghcr=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ]; then
+            echo "dockerhub=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "dockerhub=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
@@ -29,7 +48,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Fork tidak punya secret Docker Hub. Tanpa guard ini step gagal dan
+      # menggagalkan seluruh job, sehingga GHCR pun ikut tidak terbit.
       - name: Log in to Docker Hub
+        if: steps.names.outputs.dockerhub == 'true'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -40,11 +62,16 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: |
-            ${{ env.GHCR_IMAGE }}
-            ${{ env.DOCKERHUB_IMAGE }}
+            ${{ steps.names.outputs.ghcr }}
+            ${{ steps.names.outputs.dockerhub == 'true' && env.DOCKERHUB_IMAGE || '' }}
           tags: |
             type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-,format=short
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -53,8 +80,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=registry,ref=${{ env.GHCR_IMAGE }}:buildcache
-          cache-to: type=registry,ref=${{ env.GHCR_IMAGE }}:buildcache,mode=max
+          cache-from: type=registry,ref=${{ steps.names.outputs.ghcr }}:buildcache
+          cache-to: type=registry,ref=${{ steps.names.outputs.ghcr }}:buildcache,mode=max
           platforms: linux/amd64,linux/arm64
           provenance: false
           sbom: false
