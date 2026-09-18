@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { Badge, Button, Card, CardSkeleton, Input, Modal, Toggle, ConfirmModal } from "@/shared/components";
+import { Badge, Button, Card, CardSkeleton, Input, Modal, Toggle, ConfirmModal, SegmentedControl } from "@/shared/components";
 import { useNotificationStore } from "@/store/notificationStore";
+import ClientActivityTab from "./components/ClientActivityTab";
 
 function formatRelativeTime(ts) {
   if (!ts) return "Never";
@@ -57,6 +58,7 @@ function getToolBadge(tool, category) {
 }
 
 export default function ClientsPageClient() {
+  const [activeTab, setActiveTab] = useState("connections");
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -248,8 +250,25 @@ export default function ClientsPageClient() {
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Header Info */}
+      {/* Navigation Tabs */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <SegmentedControl
+          options={[
+            { value: "connections", label: "Connections", icon: "devices" },
+            { value: "activity", label: "Usage & Activity", icon: "monitoring" },
+          ]}
+          value={activeTab}
+          onChange={setActiveTab}
+          className="w-full sm:w-auto"
+        />
+      </div>
+
+      {activeTab === "activity" ? (
+        <ClientActivityTab />
+      ) : (
+        <>
+          {/* Header Info */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-bold tracking-tight text-text-main flex items-center gap-2">
             <span className="material-symbols-outlined text-primary text-[24px]">devices</span>
@@ -660,6 +679,8 @@ export default function ClientsPageClient() {
           confirmText="Remove"
           variant="danger"
         />
+      )}
+        </>
       )}
     </div>
   );

@@ -123,6 +123,7 @@ function scheduleFlush() {
     try {
       const db = await getAdapter();
       const now = Date.now();
+      const minuteBucket = Math.floor(now / 60000) * 60000;
       db.transaction(() => {
         for (const item of items) {
           db.run(
@@ -147,6 +148,18 @@ function scheduleFlush() {
               now,
             ]
           );
+
+          try {
+            db.run(
+              `INSERT INTO clientActivityTimeline(ip, minuteBucket, requestCount)
+               VALUES(?, ?, ?)
+               ON CONFLICT(ip, minuteBucket) DO UPDATE SET
+                 requestCount = clientActivityTimeline.requestCount + excluded.requestCount`,
+              [item.ip, minuteBucket, item.count || 1]
+            );
+          } catch {
+            // Table might not exist yet if migration pending
+          }
         }
       });
       syncClientsToJson().catch(() => {});
@@ -167,4 +180,102 @@ export function recordClientActivity(ip, { tool = "CLI Tool", category = "cli", 
   if (userAgent) existing.userAgent = userAgent;
   activityBuffer.set(ip, existing);
   scheduleFlush();
+}
+
+/**
+ * Get aggregated activity timeline for clients.
+ * @param {string} period - "1h" | "24h" | "7d"
+ * @param {string} filterIp - "all" | specific IP
+ */
+export async function getClientActivityStats(period = "24h", filterIp = "all") {
+  const db = await getAdapter();
+  const now = Date.now();
+
+  // Ensure table exists safely
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS clientActivityTimeline (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ip TEXT NOT NULL,
+      minuteBucket INTEGER NOT NULL,
+      requestCount INTEGER DEFAULT 0
+    )`);
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_cat_ip_bucket ON clientActivityTimeline(ip, minuteBucket)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_cat_bucket ON clientActivityTimeline(minuteBucket)`);
+  } catch {}
+
+  let bucketCount = 24;
+  let bucketMs = 3600000; // 1h
+  let startTime = now - bucketCount * bucketMs;
+  let labelFn = (ts) => new Date(ts).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+
+  if (period === "1h") {
+    bucketCount = 30;
+    bucketMs = 120000; // 2 min
+    startTime = now - bucketCount * bucketMs;
+    labelFn = (ts) => new Date(ts).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+  } else if (period === "7d") {
+    bucketCount = 7;
+    bucketMs = 86400000; // 1 day
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    startTime = startOfToday.getTime() - (bucketCount - 1) * bucketMs;
+    labelFn = (ts) => new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  }
+
+  const buckets = Array.from({ length: bucketCount }, (_, i) => {
+    const bucketStart = startTime + i * bucketMs;
+    return {
+      timestamp: bucketStart,
+      label: labelFn(bucketStart),
+      requests: 0,
+      activeClients: 0,
+      clientBreakdown: {},
+    };
+  });
+
+  // Query recorded timeline
+  let where = "WHERE minuteBucket >= ?";
+  const params = [startTime];
+  if (filterIp && filterIp !== "all") {
+    where += " AND ip = ?";
+    params.push(filterIp);
+  }
+
+  const rows = db.all(
+    `SELECT ip, minuteBucket, requestCount FROM clientActivityTimeline ${where} ORDER BY minuteBucket ASC`,
+    params
+  );
+
+  for (const r of rows) {
+    const ts = Number(r.minuteBucket);
+    if (ts < startTime) continue;
+    const idx = Math.min(Math.floor((ts - startTime) / bucketMs), bucketCount - 1);
+    if (idx >= 0 && idx < bucketCount) {
+      buckets[idx].requests += r.requestCount || 0;
+      buckets[idx].clientBreakdown[r.ip] = (buckets[idx].clientBreakdown[r.ip] || 0) + (r.requestCount || 0);
+    }
+  }
+
+  // Include in-flight buffer memory
+  const bufferItems = Array.from(activityBuffer.values());
+  for (const item of bufferItems) {
+    if (filterIp && filterIp !== "all" && item.ip !== filterIp) continue;
+    const idx = Math.min(Math.floor((now - startTime) / bucketMs), bucketCount - 1);
+    if (idx >= 0 && idx < bucketCount) {
+      buckets[idx].requests += item.count || 0;
+      buckets[idx].clientBreakdown[item.ip] = (buckets[idx].clientBreakdown[item.ip] || 0) + (item.count || 0);
+    }
+  }
+
+  for (const b of buckets) {
+    b.activeClients = Object.keys(b.clientBreakdown).length;
+  }
+
+  return {
+    period,
+    filterIp,
+    startTime,
+    endTime: now,
+    buckets,
+  };
 }

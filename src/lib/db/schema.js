@@ -171,6 +171,18 @@ export const TABLES = {
       "CREATE INDEX IF NOT EXISTS idx_clients_lastSeen ON clients(lastSeen)",
     ],
   },
+  clientActivityTimeline: {
+    columns: {
+      id: "INTEGER PRIMARY KEY AUTOINCREMENT",
+      ip: "TEXT NOT NULL",
+      minuteBucket: "INTEGER NOT NULL",
+      requestCount: "INTEGER DEFAULT 0",
+    },
+    indexes: [
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_cat_ip_bucket ON clientActivityTimeline(ip, minuteBucket)",
+      "CREATE INDEX IF NOT EXISTS idx_cat_bucket ON clientActivityTimeline(minuteBucket)",
+    ],
+  },
 };
 
 export function buildCreateTableSql(name, def) {
