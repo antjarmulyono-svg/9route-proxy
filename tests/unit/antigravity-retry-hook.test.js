@@ -98,4 +98,18 @@ describe("antigravity computeRetryDelay hook (D3)", () => {
     expect(out.requestId).toMatch(/^agent\/[0-9a-f-]{36}\/\d{13}\/[0-9a-f-]{36}\/\d+$/);
     expect(out.request.generationConfig.maxOutputTokens).toBe(64000);
   });
+
+  it("clamps thinkingBudget to >= 1024 for Claude models on Vertex", () => {
+    const out = ag.transformRequest("claude-opus-4-6-thinking", {
+      request: {
+        contents: [{ role: "user", parts: [{ text: "hi" }] }],
+        generationConfig: {
+          maxOutputTokens: 64000,
+          thinkingConfig: { includeThoughts: true, thinkingBudget: 1000 },
+        },
+      },
+    }, true, { projectId: "project-1", connectionId: "conn-1" });
+
+    expect(out.request.generationConfig.thinkingConfig.thinkingBudget).toBe(1024);
+  });
 });

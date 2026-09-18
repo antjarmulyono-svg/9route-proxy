@@ -271,6 +271,13 @@ export class AntigravityExecutor extends BaseExecutor {
     if (generationConfig.maxOutputTokens > MAX_ANTIGRAVITY_OUTPUT_TOKENS) {
       generationConfig.maxOutputTokens = MAX_ANTIGRAVITY_OUTPUT_TOKENS;
     }
+    // Antigravity routes Claude/Anthropic thinking through Vertex, where Anthropic
+    // requires thinking.enabled.budget_tokens >= 1024. Antigravity IDE sends a default
+    // thinkingBudget of 1000, which Vertex rejects with HTTP 400 INVALID_ARGUMENT.
+    // Clamp any non-zero thinkingBudget to at least 1024.
+    if (generationConfig.thinkingConfig?.thinkingBudget > 0 && generationConfig.thinkingConfig.thinkingBudget < 1024) {
+      generationConfig.thinkingConfig.thinkingBudget = 1024;
+    }
 
     const transformedRequest = {
       ...requestWithoutTools,

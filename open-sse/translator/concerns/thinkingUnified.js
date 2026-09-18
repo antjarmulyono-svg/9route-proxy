@@ -272,7 +272,11 @@ function applyFormat(fmt, body, cfg, caps, supportedLevels) {
     }
     case "gemini-budget": {
       if (none && canDisable) { setGeminiThinking(body, { thinkingBudget: 0, includeThoughts: false }); break; }
-      const budget = toBudget(eff, caps.thinkingRange);
+      let budget = toBudget(eff, caps.thinkingRange);
+      // Ensure budget meets minimum 1024 if model routes through Vertex/Anthropic or requires >= 1024
+      if (Number.isFinite(budget) && budget > 0 && budget < 1024) {
+        budget = 1024;
+      }
       setGeminiThinking(body, { thinkingBudget: budget ?? -1, includeThoughts: true });
       ensureGeminiOutputFloor(body, geminiBudgetOutputFloor(budget ?? -1), caps);
       break;
