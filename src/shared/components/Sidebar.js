@@ -36,6 +36,7 @@ const debugItems = [
 
 const systemItems = [
   { href: "/dashboard/clients", label: "Client Connections", icon: "devices" },
+  { href: "/dashboard/clients/activity", label: "Client Activity & Monitoring", icon: "monitoring" },
   { href: "/dashboard/proxy-pools", label: "Proxy Pools", icon: "lan" },
   { href: "/dashboard/skills", label: "Skills", icon: "extension" },
 ];
@@ -72,6 +73,9 @@ export default function Sidebar({ onClose }) {
   const isActive = (href) => {
     if (href === "/dashboard/endpoint") {
       return pathname === "/dashboard" || pathname.startsWith("/dashboard/endpoint");
+    }
+    if (href === "/dashboard/clients") {
+      return pathname === "/dashboard/clients";
     }
     return pathname.startsWith(href);
   };

@@ -1,3 +1,5 @@
+import { Suspense } from "react";
+import { CardSkeleton } from "@/shared/components";
 import ClientsPageClient from "./ClientsPageClient";
 
 export const metadata = {
@@ -6,5 +8,9 @@ export const metadata = {
 };
 
 export default function ClientsPage() {
-  return <ClientsPageClient />;
+  return (
+    <Suspense fallback={<CardSkeleton />}>
+      <ClientsPageClient />
+    </Suspense>
+  );
 }

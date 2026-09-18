@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { Badge, Button, Card, CardSkeleton, Input, Modal, Toggle, ConfirmModal, SegmentedControl } from "@/shared/components";
 import { useNotificationStore } from "@/store/notificationStore";
 import ClientActivityTab from "./components/ClientActivityTab";
@@ -58,7 +59,22 @@ function getToolBadge(tool, category) {
 }
 
 export default function ClientsPageClient() {
-  const [activeTab, setActiveTab] = useState("connections");
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const tabParam = searchParams.get("tab");
+  const activeTab = tabParam === "activity" ? "activity" : "connections";
+
+  const handleTabChange = (newTab) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (newTab === "activity") {
+      params.set("tab", "activity");
+    } else {
+      params.delete("tab");
+    }
+    const query = params.toString();
+    router.replace(query ? `/dashboard/clients?${query}` : "/dashboard/clients", { scroll: false });
+  };
+
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -258,7 +274,7 @@ export default function ClientsPageClient() {
             { value: "activity", label: "Usage & Activity", icon: "monitoring" },
           ]}
           value={activeTab}
-          onChange={setActiveTab}
+          onChange={handleTabChange}
           className="w-full sm:w-auto"
         />
       </div>
