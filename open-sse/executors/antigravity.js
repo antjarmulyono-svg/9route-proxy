@@ -297,13 +297,19 @@ export class AntigravityExecutor extends BaseExecutor {
     const resolvedModel = (body.model && !body.model.toLowerCase().includes("combo") && !body.model.includes("/"))
       ? body.model
       : model;
+    // Official Antigravity client omits `requestType` entirely on the agent
+    // (chat) path. Sending `requestType: "agent"` here (or leaking it through
+    // from an upstream envelope via the ...body spread below) makes Google
+    // bucket the request and return a detail-free 429 RESOURCE_EXHAUSTED even
+    // with quota available. `image_gen` and
+    // `search` buckets are unaffected and keep their own requestType.
+    delete body.requestType;
 
     return {
       ...body,
       project: projectId,
       model: resolvedModel,
       userAgent: "antigravity",
-      requestType: "agent",
       requestId: buildIdeRequestId({ body, request: transformedRequest, credentials, model: resolvedModel, requestType: "agent" }),
       request: transformedRequest
     };
