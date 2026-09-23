@@ -270,7 +270,7 @@ async function probeAntigravityInference(connection, accessToken, effectiveProxy
     return {
       valid: false,
       status: res.status,
-      error: "Google requires account verification — open the account in a browser and complete the challenge.",
+      error: "Google requires account verification — open https://antigravity.google in a browser, sign in with this account, and complete the challenge. If it persists, check https://accounts.google.com/DisplayUnlockCaptcha and https://myaccount.google.com/notifications",
     };
   }
 
