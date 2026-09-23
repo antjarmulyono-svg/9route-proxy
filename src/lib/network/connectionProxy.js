@@ -1,5 +1,6 @@
 import { getProxyPoolById } from "@/models";
 import { normalizeRegion, tierRank } from "@/shared/constants/proxyPoolMeta";
+import { ensurePoolFitnessHydrated, fitPoolIds } from "open-sse/services/proxyPoolFitness.js";
 
 // Safely normalize any value into a trimmed string.
 function normalizeString(value) {
@@ -39,8 +40,20 @@ function applyStrategy(poolIds, strategy, providerId) {
  * Kept for callers that rotate over a pre-built id list with no geo/quality
  * preference; region/tier-aware callers should use selectProxyPool instead.
  */
-export function pickProxyPoolId(poolIds, strategy, providerId) {
-  return applyStrategy(poolIds, strategy, providerId);
+export function pickProxyPoolId(poolIds, strategy, providerId, opts = {}) {
+  if (!poolIds || poolIds.length === 0) return null;
+  const { scope = null, excludeIds = [] } = opts || {};
+
+  let eligible = poolIds.filter((id) => !(excludeIds || []).includes(id));
+  if (strategy === "smart" && scope) eligible = fitPoolIds(eligible, scope);
+
+  if (eligible.length === 0) {
+    if (providerId === "freebuff" && strategy === "smart") return null;
+    eligible = poolIds.filter((id) => !(excludeIds || []).includes(id));
+    if (eligible.length === 0) return null;
+  }
+
+  return applyStrategy(eligible, strategy, providerId);
 }
 
 /**

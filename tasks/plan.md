@@ -1,29 +1,28 @@
-# Implementation Plan: Client Connections Tabs & Usage Activity Chart
+# Implementation Plan: MIBP Features Port to Staging
 
 ## Overview
-Menambahkan sistem tabulasi pada halaman `/dashboard/clients` dan dashboard pemantauan visual dengan grafik time-series untuk melihat tren aktivitas request per client IP.
+Implementasi fitur terpilih dari `mhiqrambg/9router-mibp-version` secara bertahap pada branch `feature/mibp-staging`, diverifikasi via unit test, lalu dideploy ke container staging (port 20129).
 
 ## Task List
 
-### Phase 1: Backend Data Aggregation API
-- [ ] Task 1.1: Buat fungsi agregasi time-series client activity di repo (`src/lib/db/repos/clientsRepo.js` atau `usageRepo.js`).
-  - Hitung request per bucket waktu (`1h` interval 2m, `24h` interval 1h, `7d` interval 1d).
-  - Simpan / ambil data agregasi per IP.
-- [ ] Task 1.2: Buat route endpoint `GET /api/clients/activity-stats`.
-  - Dukung query params `period` dan `ip`.
+### Phase 1: Test Isolation & Usage Guard (Fondasi)
+- [ ] Task 1.1: Port `tests/setup/isolateDataDir.js` dan kaitkan ke `tests/vitest.config.js`.
+- [ ] Task 1.2: Tambahkan guard test `tests/unit/test-data-dir-isolation.test.js`.
+- [ ] Task 1.3: Port `src/shared/utils/usageProviders.js` (filter `!p.hidden`) dan pasang unit test `tests/unit/usage-provider-list.test.js`.
 
-### Phase 2: Frontend Client Activity Component & Chart
-- [ ] Task 2.1: Buat komponen `ClientActivityTab.js` di `src/app/(dashboard)/dashboard/clients/components/`.
-  - Buat visualisasi grafik `AreaChart` / `LineChart` dengan Recharts untuk tren naik-turun request client.
-  - Dropdown selector untuk memilih client IP atau aggregate semua client.
-  - Filter periode waktu (`1h`, `24h`, `7d`).
-  - Summary cards aktivitas klien aktif.
+### Phase 2: Proxy Pool Fitness & Geo Probe Core
+- [ ] Task 2.1: Port `open-sse/services/proxyPoolFitness.js` dan unit test `tests/unit/proxy-pool-fitness.test.js`.
+- [ ] Task 2.2: Port `open-sse/services/poolGeo.js` dan unit test `tests/unit/pool-geo.test.js`.
+- [ ] Task 2.3: Port `src/lib/network/poolEgressProbe.js` & `src/lib/network/stateSweeper.js` untuk probing IP keluar.
+- [ ] Task 2.4: Integrasikan smart rotation pada `src/lib/network/connectionProxy.js` agar memfilter unfit pool.
 
-### Phase 3: Integrasi Tabulasi di Halaman Client Connections
-- [ ] Task 3.1: Tambahkan `SegmentedControl` di `ClientsPageClient.js` untuk beralih antara tab `Connections` dan `Usage & Activity`.
-- [ ] Task 3.2: Render `ClientActivityTab` ketika tab `Usage & Activity` aktif, dan tetap pertahankan tabel koneksi di tab `Connections`.
+### Phase 3: Dashboard Proxy Fitness UI
+- [ ] Task 3.1: Tambahkan API routes `/api/proxy-pools/fitness` atau router helper terkait.
+- [ ] Task 3.2: Port halaman dashboard `src/app/(dashboard)/dashboard/proxy-fitness/page.js`.
+- [ ] Task 3.3: Daftarkan menu "Proxy Pool Fitness" di `src/shared/components/Sidebar.js`.
 
-### Phase 4: Verifikasi & Deployment
-- [ ] Task 4.1: Jalankan `npm run test:gate` untuk memastikan tidak ada regresi.
-- [ ] Task 4.2: Build dan deploy container dengan `make docker-update`.
-- [ ] Task 4.3: Verifikasi fungsionalitas dan tampilan grafik.
+### Phase 4: Verifikasi & Deployment Staging
+- [ ] Task 4.1: Jalankan `npm run test:gate` dan verifikasi 0 regresi.
+- [ ] Task 4.2: Build image staging dan deploy:
+  `docker compose -p 9router-staging -f docker-compose.staging.yml up -d --build`
+- [ ] Task 4.3: Verifikasi API health port 20129 dan pastikan dashboard staging aktif.

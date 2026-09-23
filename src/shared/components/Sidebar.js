@@ -38,6 +38,7 @@ const systemItems = [
   { href: "/dashboard/clients", label: "Client Connections", icon: "devices" },
   { href: "/dashboard/clients/activity", label: "Client Activity & Monitoring", icon: "monitoring" },
   { href: "/dashboard/proxy-pools", label: "Proxy Pools", icon: "lan" },
+  { href: "/dashboard/proxy-fitness", label: "Proxy Fitness", icon: "health_and_safety" },
   { href: "/dashboard/skills", label: "Skills", icon: "extension" },
 ];
 
