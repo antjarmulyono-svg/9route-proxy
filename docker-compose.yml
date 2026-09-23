@@ -7,6 +7,9 @@ services:
     ports:
       - "20128:20128"
       - "443:443"
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     volumes:
       - 9router-data:/app/data
     env_file:

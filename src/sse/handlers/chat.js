@@ -102,6 +102,7 @@ export async function handleChat(request, clientRawRequest = null) {
     const comboStrategies = settings.comboStrategies || {};
     const comboSpecificStrategy = comboStrategies[modelStr]?.fallbackStrategy;
     const comboStrategy = comboSpecificStrategy || settings.comboStrategy || "fallback";
+    const comboAutoSwitch = comboStrategies[modelStr]?.autoSwitch ?? true;
     const augmentedModels = augmentModelsWithCapacityAdapter(comboModels, requiredCapabilities, settings);
     const adapterAdded = augmentedModels.filter((m) => !comboModels.includes(m));
 
@@ -126,7 +127,7 @@ export async function handleChat(request, clientRawRequest = null) {
     }
 
     const comboStickyLimit = settings.comboStickyRoundRobinLimit;
-    log.info("CHAT", `Combo "${modelStr}" with ${augmentedModels.length} models (strategy: ${comboStrategy}, sticky: ${comboStickyLimit})`);
+    log.info("CHAT", `Combo "${modelStr}" with ${augmentedModels.length} models (strategy: ${comboStrategy}, sticky: ${comboStickyLimit}, autoSwitch: ${comboAutoSwitch})`);
     return handleComboChat({
       body,
       models: augmentedModels,
@@ -137,7 +138,8 @@ export async function handleChat(request, clientRawRequest = null) {
       log,
       comboName: modelStr,
       comboStrategy,
-      comboStickyLimit
+      comboStickyLimit,
+      autoSwitch: comboAutoSwitch
     });
   }
 
@@ -178,6 +180,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       const comboStrategies = chatSettings.comboStrategies || {};
       const comboSpecificStrategy = comboStrategies[modelStr]?.fallbackStrategy;
       const comboStrategy = comboSpecificStrategy || chatSettings.comboStrategy || "fallback";
+      const comboAutoSwitch = comboStrategies[modelStr]?.autoSwitch ?? true;
       const requiredCapabilities = detectRequiredCapabilities(body);
       const augmentedModels = augmentModelsWithCapacityAdapter(comboModels, requiredCapabilities, chatSettings);
       const adapterAdded = augmentedModels.filter((m) => !comboModels.includes(m));
@@ -203,7 +206,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       }
 
       const comboStickyLimit = chatSettings.comboStickyRoundRobinLimit;
-      log.info("CHAT", `Combo "${modelStr}" with ${augmentedModels.length} models (strategy: ${comboStrategy}, sticky: ${comboStickyLimit})`);
+      log.info("CHAT", `Combo "${modelStr}" with ${augmentedModels.length} models (strategy: ${comboStrategy}, sticky: ${comboStickyLimit}, autoSwitch: ${comboAutoSwitch})`);
       return handleComboChat({
         body,
         models: augmentedModels,
@@ -214,7 +217,8 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         log,
         comboName: modelStr,
         comboStrategy,
-        comboStickyLimit
+        comboStickyLimit,
+        autoSwitch: comboAutoSwitch
       });
     }
     log.warn("CHAT", "Invalid model format", { model: modelStr });
