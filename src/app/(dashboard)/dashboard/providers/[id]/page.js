@@ -515,16 +515,14 @@ export default function ProviderDetailPage() {
   };
 
   const handleDeleteAlias = async (alias) => {
-    try {
-      const res = await fetch(`/api/models/alias?alias=${encodeURIComponent(alias)}`, {
-        method: "DELETE",
-      });
-      if (res.ok) {
-        await fetchAliases();
-      }
-    } catch (error) {
-      console.log("Error deleting alias:", error);
+    const res = await fetch(`/api/models/alias?alias=${encodeURIComponent(alias)}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `Failed to delete alias (${res.status})`);
     }
+    await fetchAliases();
   };
 
   const handleAddCustomModel = async (modelId, type = "llm", providerAliasOverride = providerStorageAlias) => {
@@ -547,16 +545,14 @@ export default function ProviderDetailPage() {
   };
 
   const handleDeleteCustomModel = async (modelId, type = "llm", providerAliasOverride = providerStorageAlias) => {
-    try {
-      const params = new URLSearchParams({ providerAlias: providerAliasOverride, id: modelId, type });
-      const res = await fetch(`/api/models/custom?${params}`, { method: "DELETE" });
-      if (res.ok) {
-        await fetchCustomModels();
-        if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("customModelChanged"));
-      }
-    } catch (error) {
-      console.log("Error deleting custom model:", error);
+    const params = new URLSearchParams({ providerAlias: providerAliasOverride, id: modelId, type });
+    const res = await fetch(`/api/models/custom?${params}`, { method: "DELETE" });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `Failed to delete custom model (${res.status})`);
     }
+    await fetchCustomModels();
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("customModelChanged"));
   };
 
   // Fetch Qoder model list and automatically add to available models

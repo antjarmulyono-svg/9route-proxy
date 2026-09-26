@@ -2,6 +2,39 @@ function modelType(model) {
   return model?.kind || model?.type || "llm";
 }
 
+export async function runSequentialModelTests({ modelIds, testModel, onProgress = () => {} }) {
+  const results = [];
+
+  for (const modelId of modelIds) {
+    onProgress({ modelId, state: "testing", error: null });
+
+    let result;
+    try {
+      const response = await testModel(modelId);
+      result = {
+        modelId,
+        ok: response?.ok === true,
+        error: response?.ok === true ? null : (response?.error || "Model not reachable"),
+      };
+    } catch (error) {
+      result = {
+        modelId,
+        ok: false,
+        error: error instanceof Error ? error.message : "Model test failed",
+      };
+    }
+
+    results.push(result);
+    onProgress({
+      modelId,
+      state: result.ok ? "success" : "error",
+      error: result.error,
+    });
+  }
+
+  return results;
+}
+
 export function getProviderCustomModelRows({
   customModels = [],
   modelAliases = {},

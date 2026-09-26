@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels.js";
+import {
+  getProviderCustomModelRows,
+  runSequentialModelTests,
+} from "@/shared/utils/providerCustomModels.js";
 
 describe("provider custom model rows", () => {
   it("keeps identical model IDs separate per provider", () => {
@@ -79,6 +82,62 @@ describe("provider custom model rows", () => {
         source: "custom",
         type: "llm",
       },
+    ]);
+  });
+
+  it("tests models sequentially and reports progress in order", async () => {
+    const activeRequests = { count: 0, max: 0 };
+    const tested = [];
+    const progress = [];
+
+    const results = await runSequentialModelTests({
+      modelIds: ["model-a", "model-b", "model-c"],
+      testModel: async (modelId) => {
+        activeRequests.count += 1;
+        activeRequests.max = Math.max(activeRequests.max, activeRequests.count);
+        tested.push(modelId);
+        await Promise.resolve();
+        activeRequests.count -= 1;
+        return modelId === "model-b"
+          ? { ok: false, error: "Unavailable" }
+          : { ok: true };
+      },
+      onProgress: (entry) => progress.push(entry),
+    });
+
+    expect(activeRequests.max).toBe(1);
+    expect(tested).toEqual(["model-a", "model-b", "model-c"]);
+    expect(results).toEqual([
+      { modelId: "model-a", ok: true, error: null },
+      { modelId: "model-b", ok: false, error: "Unavailable" },
+      { modelId: "model-c", ok: true, error: null },
+    ]);
+    expect(progress.map((entry) => `${entry.modelId}:${entry.state}`)).toEqual([
+      "model-a:testing",
+      "model-a:success",
+      "model-b:testing",
+      "model-b:error",
+      "model-c:testing",
+      "model-c:success",
+    ]);
+  });
+
+  it("continues sequential tests after request errors", async () => {
+    const tested = [];
+
+    const results = await runSequentialModelTests({
+      modelIds: ["model-a", "model-b"],
+      testModel: async (modelId) => {
+        tested.push(modelId);
+        if (modelId === "model-a") throw new Error("Network error");
+        return { ok: true };
+      },
+    });
+
+    expect(tested).toEqual(["model-a", "model-b"]);
+    expect(results).toEqual([
+      { modelId: "model-a", ok: false, error: "Network error" },
+      { modelId: "model-b", ok: true, error: null },
     ]);
   });
 });

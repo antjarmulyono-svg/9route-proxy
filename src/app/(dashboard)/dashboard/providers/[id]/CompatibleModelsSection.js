@@ -2,9 +2,12 @@
 
 import { useState } from "react";
 import PropTypes from "prop-types";
-import { Button } from "@/shared/components";
-import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
-function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias, onTest, testStatus, isTesting }) {
+import { Button, ConfirmModal } from "@/shared/components";
+import {
+  getProviderCustomModelRows,
+  runSequentialModelTests,
+} from "@/shared/utils/providerCustomModels";
+function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias, onTest, testStatus, testError, isTesting, bulkActionRunning }) {
   const borderColor = testStatus === "ok"
     ? "border-green-500/40"
     : testStatus === "error"
@@ -26,9 +29,9 @@ function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias,
         {testStatus === "ok" ? "check_circle" : testStatus === "error" ? "cancel" : "smart_toy"}
       </span>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium truncate">{modelId}</p>
-        <div className="flex items-center gap-1 mt-1">
-          <code className="text-xs text-text-muted font-mono bg-sidebar px-1.5 py-0.5 rounded">{fullModel}</code>
+        <p className="truncate text-sm font-medium" title={modelId}>{modelId}</p>
+        <div className="mt-1 flex min-w-0 items-center gap-1">
+          <code className="min-w-0 truncate rounded bg-sidebar px-1.5 py-0.5 font-mono text-xs text-text-muted" title={fullModel}>{fullModel}</code>
           <div className="relative group/btn">
             <button
               onClick={() => onCopy(fullModel, `model-${modelId}`)}
@@ -46,8 +49,10 @@ function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias,
             <div className="relative group/btn">
               <button
                 onClick={onTest}
-                disabled={isTesting}
-                className="p-0.5 hover:bg-sidebar rounded text-text-muted hover:text-primary transition-colors"
+                disabled={bulkActionRunning}
+                aria-label={`Test ${modelId}`}
+                title={isTesting ? "Testing model" : "Test model"}
+                className="min-h-11 min-w-11 rounded text-text-muted transition-colors hover:bg-sidebar hover:text-primary disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-0 sm:min-w-0 sm:p-0.5"
               >
                 <span className="material-symbols-outlined text-sm" style={isTesting ? { animation: "spin 1s linear infinite" } : undefined}>
                   {isTesting ? "progress_activity" : "science"}
@@ -59,10 +64,15 @@ function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias,
             </div>
           )}
         </div>
+        {testError && (
+          <p className="mt-1 break-words text-xs text-red-500" role="status">{testError}</p>
+        )}
       </div>
       <button
         onClick={onDeleteAlias}
-        className="p-1 hover:bg-red-50 rounded text-red-500"
+        disabled={bulkActionRunning}
+        aria-label={`Remove ${modelId}`}
+        className="min-h-11 min-w-11 rounded text-red-500 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-0 sm:min-w-0 sm:p-1"
         title="Remove model"
       >
         <span className="material-symbols-outlined text-sm">delete</span>
@@ -77,20 +87,36 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
   const [importing, setImporting] = useState(false);
   const [testingModelId, setTestingModelId] = useState(null);
   const [modelTestResults, setModelTestResults] = useState({});
+  const [modelTestErrors, setModelTestErrors] = useState({});
+  const [testingAll, setTestingAll] = useState(false);
+  const [testSummary, setTestSummary] = useState(null);
+  const [showDeleteAllConfirm, setShowDeleteAllConfirm] = useState(false);
+  const [deletingAll, setDeletingAll] = useState(false);
+
+  const requestModelTest = async (modelId) => {
+    const res = await fetch("/api/models/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: `${providerStorageAlias}/${modelId}` }),
+    });
+    const data = await res.json();
+    return {
+      ok: res.ok && data.ok === true,
+      error: data.error || (!res.ok ? `HTTP ${res.status}` : null),
+    };
+  };
 
   const handleTestModel = async (modelId) => {
-    if (testingModelId) return;
+    if (testingModelId || testingAll) return;
     setTestingModelId(modelId);
+    setModelTestErrors((prev) => ({ ...prev, [modelId]: null }));
     try {
-      const res = await fetch("/api/models/test", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: `${providerStorageAlias}/${modelId}` }),
-      });
-      const data = await res.json();
-      setModelTestResults((prev) => ({ ...prev, [modelId]: data.ok ? "ok" : "error" }));
-    } catch {
+      const result = await requestModelTest(modelId);
+      setModelTestResults((prev) => ({ ...prev, [modelId]: result.ok ? "ok" : "error" }));
+      setModelTestErrors((prev) => ({ ...prev, [modelId]: result.error }));
+    } catch (error) {
       setModelTestResults((prev) => ({ ...prev, [modelId]: "error" }));
+      setModelTestErrors((prev) => ({ ...prev, [modelId]: error.message || "Network error" }));
     } finally {
       setTestingModelId(null);
     }
@@ -102,6 +128,80 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
     providerAlias: providerStorageAlias,
     type: "llm",
   });
+
+  const handleTestAll = async () => {
+    if (testingAll || testingModelId || allModels.length === 0) return;
+
+    setTestingAll(true);
+    setTestSummary({ total: allModels.length, completed: 0, passed: 0, failed: 0 });
+    setModelTestResults({});
+    setModelTestErrors({});
+
+    const results = await runSequentialModelTests({
+      modelIds: allModels.map((model) => model.id),
+      testModel: requestModelTest,
+      onProgress: ({ modelId, state, error }) => {
+        if (state === "testing") {
+          setTestingModelId(modelId);
+          return;
+        }
+
+        setModelTestResults((prev) => ({
+          ...prev,
+          [modelId]: state === "success" ? "ok" : "error",
+        }));
+        setModelTestErrors((prev) => ({ ...prev, [modelId]: error }));
+        setTestSummary((prev) => ({
+          ...prev,
+          completed: prev.completed + 1,
+          passed: prev.passed + (state === "success" ? 1 : 0),
+          failed: prev.failed + (state === "error" ? 1 : 0),
+        }));
+      },
+    });
+
+    setTestingModelId(null);
+    setTestingAll(false);
+    return results;
+  };
+
+  const deleteModel = async (model) => {
+    if (model.source === "custom") {
+      await onDeleteCustomModel(model.id);
+      return;
+    }
+    await onDeleteAlias(model.alias);
+  };
+
+  const handleDeleteOne = async (model) => {
+    try {
+      await deleteModel(model);
+    } catch (error) {
+      alert(error.message || "Model could not be deleted.");
+    }
+  };
+
+  const handleDeleteAll = async () => {
+    if (deletingAll || allModels.length === 0) return;
+
+    setDeletingAll(true);
+    let failed = 0;
+    for (const model of allModels) {
+      try {
+        await deleteModel(model);
+      } catch (error) {
+        console.log("Error deleting model:", error);
+        failed += 1;
+      }
+    }
+
+    setDeletingAll(false);
+    setShowDeleteAllConfirm(false);
+    setModelTestResults({});
+    setModelTestErrors({});
+    setTestSummary(null);
+    if (failed > 0) alert(`${failed} model(s) could not be deleted.`);
+  };
 
   const handleAdd = async () => {
     if (!newModel.trim() || adding) return;
@@ -193,23 +293,70 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
         </p>
       )}
 
-      {allModels.length > 0 && (
-        <div className="flex flex-col gap-3">
-          {allModels.map(({ id, alias, source }) => (
-            <CompatibleModelRow
-              key={`${source}-${providerStorageAlias}/${id}`}
-              modelId={id}
-              fullModel={`${providerDisplayAlias}/${id}`}
-              copied={copied}
-              onCopy={onCopy}
-              onDeleteAlias={() => source === "custom" ? onDeleteCustomModel(id) : onDeleteAlias(alias)}
-              onTest={connections.length > 0 ? () => handleTestModel(id) : undefined}
-              testStatus={modelTestResults[id]}
-              isTesting={testingModelId === id}
-            />
-          ))}
-        </div>
+      {allModels.length > 0 ? (
+        <>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button
+                size="sm"
+                variant="secondary"
+                icon={testingAll ? "progress_activity" : "science"}
+                onClick={handleTestAll}
+                disabled={!canImport || testingAll || deletingAll}
+              >
+                {testingAll ? `Testing ${testSummary?.completed || 0}/${allModels.length}` : "Test All"}
+              </Button>
+              <Button
+                size="sm"
+                variant="danger"
+                icon="delete_sweep"
+                onClick={() => setShowDeleteAllConfirm(true)}
+                disabled={testingAll || deletingAll}
+              >
+                Delete All
+              </Button>
+            </div>
+            {testSummary && (
+              <p className="text-xs text-text-muted" role="status" aria-live="polite">
+                Tested {testSummary.completed}/{testSummary.total}. Passed {testSummary.passed}. Failed {testSummary.failed}.
+              </p>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-3">
+            {allModels.map((model) => (
+              <CompatibleModelRow
+                key={`${model.source}-${providerStorageAlias}/${model.id}`}
+                modelId={model.id}
+                fullModel={`${providerDisplayAlias}/${model.id}`}
+                copied={copied}
+                onCopy={onCopy}
+                onDeleteAlias={() => handleDeleteOne(model)}
+                onTest={connections.length > 0 ? () => handleTestModel(model.id) : undefined}
+                testStatus={modelTestResults[model.id]}
+                testError={modelTestErrors[model.id]}
+                isTesting={testingModelId === model.id}
+                bulkActionRunning={testingAll || deletingAll || testingModelId !== null}
+              />
+            ))}
+          </div>
+        </>
+      ) : (
+        <p className="rounded-lg border border-dashed border-border p-4 text-sm text-text-muted">
+          No models configured. Add a model ID or import from /models.
+        </p>
       )}
+
+      <ConfirmModal
+        isOpen={showDeleteAllConfirm}
+        onClose={() => !deletingAll && setShowDeleteAllConfirm(false)}
+        onConfirm={handleDeleteAll}
+        title="Delete all models"
+        message={`Delete all ${allModels.length} model(s) from ${providerDisplayAlias}? This cannot be undone.`}
+        confirmText="Delete All"
+        variant="danger"
+        loading={deletingAll}
+      />
     </div>
   );
 }
