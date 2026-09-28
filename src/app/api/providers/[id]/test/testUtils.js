@@ -258,19 +258,30 @@ async function probeAntigravityInference(connection, accessToken, effectiveProxy
 
   const bodyText = await res.text().catch(() => "");
   let reason = "";
+  let validationUrl = "";
   try {
     const start = bodyText.indexOf("{");
     const parsed = JSON.parse(start >= 0 ? bodyText.slice(start) : bodyText);
-    reason = parsed?.error?.details?.[0]?.reason || "";
+    const detail = parsed?.error?.details?.[0];
+    reason = detail?.reason || "";
+    validationUrl = detail?.metadata?.validation_url || "";
   } catch {
     // fall through — reason stays empty
   }
 
   if (res.status === 403 && reason === "VALIDATION_REQUIRED") {
+    let errMessage = "Google VALIDATION_REQUIRED";
+    if (validationUrl) {
+      errMessage += ` — Buka link verifikasi akun Google ini: ${validationUrl}`;
+    } else {
+      errMessage += " — Google membutuhkan verifikasi akun.";
+    }
+    errMessage += `\n\n[RAW GOOGLE RESPONSE]:\n${bodyText.trim() || "(empty response)"}`;
+
     return {
       valid: false,
       status: res.status,
-      error: "Google requires account verification — open https://antigravity.google in a browser, sign in with this account, and complete the challenge. If it persists, check https://accounts.google.com/DisplayUnlockCaptcha and https://myaccount.google.com/notifications",
+      error: errMessage,
     };
   }
 
