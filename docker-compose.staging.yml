@@ -40,6 +40,8 @@ services:
       # sengaja TIDAK diset di sini — proses tetap turun ke user `node`.
       BASE_URL: http://localhost:20129
       NEXT_PUBLIC_BASE_URL: http://localhost:20129
+      AG_INJECTOR_HOST: ag-injector-staging
+      AG_INJECTOR_PORT: "8125"
     depends_on:
       - headroom-staging
 
