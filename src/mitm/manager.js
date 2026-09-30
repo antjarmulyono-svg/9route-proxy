@@ -919,6 +919,7 @@ module.exports = {
   setCachedPassword,
   loadEncryptedPassword,
   clearEncryptedPassword,
+  isSudoAvailable,
   isSudoPasswordRequired,
   initDbHooks,
   restoreToolDNS,
