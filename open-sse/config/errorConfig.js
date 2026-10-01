@@ -61,6 +61,11 @@ export const ERROR_RULES = [
   { text: "no credentials",           cooldownMs: COOLDOWN.long },
   { text: "request not allowed",      cooldownMs: COOLDOWN.short },
   { text: "improperly formed request", cooldownMs: COOLDOWN.long },
+  // Anthropic reports exhausted credits as a rate_limit_error, so this must stay above
+  // the "rate limit" rule. Backoff starting at 2s is wrong here: credits do not return
+  // on their own, so every request would pay a doomed call before falling through.
+  { text: "out_of_credits",           cooldownMs: COOLDOWN.long },
+  { text: "credits_required",         cooldownMs: COOLDOWN.long },
   { text: "rate limit",               backoff: true },
   { text: "too many requests",        backoff: true },
   { text: "quota exceeded",           backoff: true },
