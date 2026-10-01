@@ -305,8 +305,14 @@ export class AntigravityExecutor extends BaseExecutor {
     // `search` buckets are unaffected and keep their own requestType.
     delete body.requestType;
 
+    // Streaming is expressed in the URL by buildUrl(), never in the payload — Google
+    // rejects the whole request with `Unknown name "stream": Cannot find field`. Dropped
+    // here rather than via stripBlacklisted() so `body` keeps them for the caller, which
+    // still reads body.stream to decide how to consume the response.
+    const { stream: _stream, stream_options: _streamOptions, ...bodyForUpstream } = body;
+
     return {
-      ...body,
+      ...bodyForUpstream,
       project: projectId,
       model: resolvedModel,
       userAgent: "antigravity",
