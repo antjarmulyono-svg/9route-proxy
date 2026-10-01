@@ -28,8 +28,11 @@ services:
       HOSTNAME: "0.0.0.0"
       NODE_ENV: production
       HEADROOM_URL: http://headroom:8787
+      AG_INJECTOR_HOST: ag-injector
+      AG_INJECTOR_PORT: "8125"
     depends_on:
       - headroom
+      - ag-injector
 
   headroom:
     image: ghcr.io/chopratejas/headroom:latest
@@ -37,6 +40,21 @@ services:
     restart: always
     ports:
       - "8787:8787"
+
+  ag-injector:
+    image: ag-login-inject:latest
+    container_name: ag-injector
+    restart: unless-stopped
+    volumes:
+      - 9router-data:/data
+      - /home/meninjar/tools/ag-login-inject/login.py:/app/login.py:ro
+      - /home/meninjar/tools/ag-login-inject/server.py:/app/server.py:ro
+    entrypoint: ["python3"]
+    command: ["/app/server.py"]
+    environment:
+      - NINEROUTER_DIR=/data
+      - NINEROUTER_PORT=20128
+      - PORT=8125
 
 volumes:
   9router-data:

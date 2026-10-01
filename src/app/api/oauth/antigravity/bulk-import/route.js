@@ -15,7 +15,7 @@ import { createProviderConnection, getProviderConnectionsByProvider } from "@/mo
  * over the internal Docker network and discarded immediately.
  */
 
-const INJECTOR_HOST = process.env.AG_INJECTOR_HOST || "ag-injector-staging";
+const INJECTOR_HOST = process.env.AG_INJECTOR_HOST || "ag-injector";
 const INJECTOR_PORT = parseInt(process.env.AG_INJECTOR_PORT || "8125", 10);
 
 export async function POST(request) {
