@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -121,12 +121,14 @@ export const TABLES = {
       status: "TEXT",
       tokens: "TEXT",
       meta: "TEXT",
+      clientIp: "TEXT",
     },
     indexes: [
       "CREATE INDEX IF NOT EXISTS idx_uh_ts ON usageHistory(timestamp DESC)",
       "CREATE INDEX IF NOT EXISTS idx_uh_provider ON usageHistory(provider)",
       "CREATE INDEX IF NOT EXISTS idx_uh_model ON usageHistory(model)",
       "CREATE INDEX IF NOT EXISTS idx_uh_conn ON usageHistory(connectionId)",
+      "CREATE INDEX IF NOT EXISTS idx_uh_client_ip ON usageHistory(clientIp)",
     ],
   },
   usageDaily: {
@@ -162,6 +164,13 @@ export const TABLES = {
       userAgent: "TEXT",
       lastSeen: "INTEGER",
       requestCount: "INTEGER DEFAULT 0",
+      promptTokens: "INTEGER DEFAULT 0",
+      completionTokens: "INTEGER DEFAULT 0",
+      totalTokens: "INTEGER DEFAULT 0",
+      tokenLimit: "INTEGER DEFAULT 0",
+      tokenLimitPeriod: "TEXT DEFAULT 'all'",
+      tokensUsedCurrentPeriod: "INTEGER DEFAULT 0",
+      periodResetAt: "INTEGER DEFAULT 0",
       notes: "TEXT",
       createdAt: "INTEGER",
       updatedAt: "INTEGER",
@@ -177,6 +186,9 @@ export const TABLES = {
       ip: "TEXT NOT NULL",
       minuteBucket: "INTEGER NOT NULL",
       requestCount: "INTEGER DEFAULT 0",
+      promptTokens: "INTEGER DEFAULT 0",
+      completionTokens: "INTEGER DEFAULT 0",
+      totalTokens: "INTEGER DEFAULT 0",
     },
     indexes: [
       "CREATE UNIQUE INDEX IF NOT EXISTS idx_cat_ip_bucket ON clientActivityTimeline(ip, minuteBucket)",

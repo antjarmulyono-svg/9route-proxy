@@ -1,20 +1,70 @@
 import { getAdapter } from "../driver.js";
 import { syncClientsToJson, writeClientRule, deleteClientRule } from "../../mitmClientCache.js";
 
+export function normalizeIp(rawIp) {
+  if (!rawIp) return "127.0.0.1";
+  let ip = String(rawIp).trim();
+  if (ip.startsWith("::ffff:")) {
+    ip = ip.substring(7);
+  }
+  if (ip === "::1") {
+    ip = "127.0.0.1";
+  }
+  return ip;
+}
+
+function calculateNextReset(period, now = Date.now()) {
+  if (period === "daily") {
+    const d = new Date(now);
+    d.setHours(24, 0, 0, 0);
+    return d.getTime();
+  }
+  if (period === "monthly") {
+    const d = new Date(now);
+    d.setMonth(d.getMonth() + 1, 1);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  }
+  return 0; // 'all' time limit has no auto-reset
+}
+
+function checkPeriodReset(row, now = Date.now()) {
+  if (!row) return row;
+  const period = row.tokenLimitPeriod || "all";
+  if (period === "all") return row;
+
+  const resetAt = Number(row.periodResetAt) || 0;
+  if (resetAt > 0 && now >= resetAt) {
+    row.tokensUsedCurrentPeriod = 0;
+    row.periodResetAt = calculateNextReset(period, now);
+  } else if (!resetAt) {
+    row.periodResetAt = calculateNextReset(period, now);
+  }
+  return row;
+}
+
 function rowToClient(row) {
   if (!row) return null;
+  const checked = checkPeriodReset(row);
   return {
-    ip: row.ip,
-    name: row.name || "",
-    enabled: row.enabled === 1 || row.enabled === true,
-    tool: row.tool || "",
-    category: row.category || "cli",
-    userAgent: row.userAgent || "",
-    lastSeen: Number(row.lastSeen) || 0,
-    requestCount: Number(row.requestCount) || 0,
-    notes: row.notes || "",
-    createdAt: Number(row.createdAt) || 0,
-    updatedAt: Number(row.updatedAt) || 0,
+    ip: checked.ip,
+    name: checked.name || "",
+    enabled: checked.enabled === 1 || checked.enabled === true,
+    tool: checked.tool || "",
+    category: checked.category || "cli",
+    userAgent: checked.userAgent || "",
+    lastSeen: Number(checked.lastSeen) || 0,
+    requestCount: Number(checked.requestCount) || 0,
+    promptTokens: Number(checked.promptTokens) || 0,
+    completionTokens: Number(checked.completionTokens) || 0,
+    totalTokens: Number(checked.totalTokens) || 0,
+    tokenLimit: Number(checked.tokenLimit) || 0,
+    tokenLimitPeriod: checked.tokenLimitPeriod || "all",
+    tokensUsedCurrentPeriod: Number(checked.tokensUsedCurrentPeriod) || 0,
+    periodResetAt: Number(checked.periodResetAt) || 0,
+    notes: checked.notes || "",
+    createdAt: Number(checked.createdAt) || 0,
+    updatedAt: Number(checked.updatedAt) || 0,
   };
 }
 
@@ -26,19 +76,29 @@ export async function getAllClients() {
 
 export async function getClientByIp(ip) {
   if (!ip) return null;
+  const cleanIp = normalizeIp(ip);
   const db = await getAdapter();
-  const row = db.get(`SELECT * FROM clients WHERE ip = ?`, [ip]);
+  const row = db.get(`SELECT * FROM clients WHERE ip = ?`, [cleanIp]);
   return rowToClient(row);
 }
 
 export async function upsertClient(clientData) {
   if (!clientData || !clientData.ip) throw new Error("Client IP is required");
+  const cleanIp = normalizeIp(clientData.ip);
   const db = await getAdapter();
   const now = Date.now();
-  const existing = await getClientByIp(clientData.ip);
+  const existing = await getClientByIp(cleanIp);
+
+  const tokenLimitPeriod = clientData.tokenLimitPeriod !== undefined 
+    ? clientData.tokenLimitPeriod 
+    : (existing?.tokenLimitPeriod || "all");
+
+  const periodResetAt = clientData.periodResetAt !== undefined
+    ? clientData.periodResetAt
+    : (existing?.periodResetAt || calculateNextReset(tokenLimitPeriod, now));
 
   const client = {
-    ip: clientData.ip,
+    ip: cleanIp,
     name: clientData.name !== undefined ? clientData.name : (existing?.name || ""),
     enabled: clientData.enabled !== undefined ? Boolean(clientData.enabled) : (existing ? existing.enabled : true),
     tool: clientData.tool || existing?.tool || "Unknown",
@@ -46,14 +106,28 @@ export async function upsertClient(clientData) {
     userAgent: clientData.userAgent || existing?.userAgent || "",
     lastSeen: clientData.lastSeen || existing?.lastSeen || now,
     requestCount: clientData.requestCount !== undefined ? clientData.requestCount : (existing?.requestCount || 0),
+    promptTokens: clientData.promptTokens !== undefined ? clientData.promptTokens : (existing?.promptTokens || 0),
+    completionTokens: clientData.completionTokens !== undefined ? clientData.completionTokens : (existing?.completionTokens || 0),
+    totalTokens: clientData.totalTokens !== undefined ? clientData.totalTokens : (existing?.totalTokens || 0),
+    tokenLimit: clientData.tokenLimit !== undefined ? Number(clientData.tokenLimit) : (existing?.tokenLimit || 0),
+    tokenLimitPeriod,
+    tokensUsedCurrentPeriod: clientData.tokensUsedCurrentPeriod !== undefined 
+      ? Number(clientData.tokensUsedCurrentPeriod) 
+      : (existing?.tokensUsedCurrentPeriod || 0),
+    periodResetAt,
     notes: clientData.notes !== undefined ? clientData.notes : (existing?.notes || ""),
     createdAt: existing?.createdAt || now,
     updatedAt: now,
   };
 
   db.run(
-    `INSERT INTO clients(ip, name, enabled, tool, category, userAgent, lastSeen, requestCount, notes, createdAt, updatedAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO clients(
+       ip, name, enabled, tool, category, userAgent, lastSeen, requestCount,
+       promptTokens, completionTokens, totalTokens,
+       tokenLimit, tokenLimitPeriod, tokensUsedCurrentPeriod, periodResetAt,
+       notes, createdAt, updatedAt
+     )
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(ip) DO UPDATE SET
        name = excluded.name,
        enabled = excluded.enabled,
@@ -62,6 +136,13 @@ export async function upsertClient(clientData) {
        userAgent = excluded.userAgent,
        lastSeen = excluded.lastSeen,
        requestCount = excluded.requestCount,
+       promptTokens = excluded.promptTokens,
+       completionTokens = excluded.completionTokens,
+       totalTokens = excluded.totalTokens,
+       tokenLimit = excluded.tokenLimit,
+       tokenLimitPeriod = excluded.tokenLimitPeriod,
+       tokensUsedCurrentPeriod = excluded.tokensUsedCurrentPeriod,
+       periodResetAt = excluded.periodResetAt,
        notes = excluded.notes,
        updatedAt = excluded.updatedAt`,
     [
@@ -73,42 +154,72 @@ export async function upsertClient(clientData) {
       client.userAgent,
       client.lastSeen,
       client.requestCount,
+      client.promptTokens,
+      client.completionTokens,
+      client.totalTokens,
+      client.tokenLimit,
+      client.tokenLimitPeriod,
+      client.tokensUsedCurrentPeriod,
+      client.periodResetAt,
       client.notes,
       client.createdAt,
       client.updatedAt,
     ]
   );
 
-  writeClientRule(client.ip, client.enabled, client.name);
+  writeClientRule(client.ip, client.enabled, client.name, {
+    tool: client.tool,
+    tokenLimit: client.tokenLimit,
+    tokenLimitPeriod: client.tokenLimitPeriod,
+    tokensUsedCurrentPeriod: client.tokensUsedCurrentPeriod,
+    totalTokens: client.totalTokens,
+    periodResetAt: client.periodResetAt,
+  });
   return client;
+}
+
+export async function resetClientUsage(ip) {
+  if (!ip) throw new Error("Client IP is required");
+  const cleanIp = normalizeIp(ip);
+  const db = await getAdapter();
+  const now = Date.now();
+  db.run(
+    `UPDATE clients 
+     SET tokensUsedCurrentPeriod = 0, updatedAt = ? 
+     WHERE ip = ?`,
+    [now, cleanIp]
+  );
+  writeClientRule(cleanIp, true, "", { tokensUsedCurrentPeriod: 0 });
+  return await getClientByIp(cleanIp);
 }
 
 export async function toggleClient(ip, enabled) {
   if (!ip) throw new Error("Client IP is required");
+  const cleanIp = normalizeIp(ip);
   const db = await getAdapter();
   const now = Date.now();
   const numericEnabled = enabled ? 1 : 0;
   
-  // Ensure record exists
-  const existing = await getClientByIp(ip);
+  const existing = await getClientByIp(cleanIp);
   if (!existing) {
-    return await upsertClient({ ip, enabled, createdAt: now, updatedAt: now });
+    return await upsertClient({ ip: cleanIp, enabled, createdAt: now, updatedAt: now });
   }
 
-  db.run(`UPDATE clients SET enabled = ?, updatedAt = ? WHERE ip = ?`, [numericEnabled, now, ip]);
-  writeClientRule(ip, enabled, existing.name);
+  db.run(`UPDATE clients SET enabled = ?, updatedAt = ? WHERE ip = ?`, [numericEnabled, now, cleanIp]);
+  writeClientRule(cleanIp, enabled, existing.name);
   return { ...existing, enabled: Boolean(enabled), updatedAt: now };
 }
 
 export async function deleteClient(ip) {
   if (!ip) return false;
+  const cleanIp = normalizeIp(ip);
   const db = await getAdapter();
-  const res = db.run(`DELETE FROM clients WHERE ip = ?`, [ip]);
-  deleteClientRule(ip);
+  const res = db.run(`DELETE FROM clients WHERE ip = ?`, [cleanIp]);
+  deleteClientRule(cleanIp);
   return (res?.changes ?? 0) > 0;
 }
 
-// Memory buffer for rapid in-flight requests to avoid heavy SQLite writes
+// Memory buffer for rapid in-flight requests and tokens
 const activityBuffer = new Map();
 let flushTimer = null;
 
@@ -126,15 +237,28 @@ function scheduleFlush() {
       const minuteBucket = Math.floor(now / 60000) * 60000;
       db.transaction(() => {
         for (const item of items) {
+          const pTok = item.promptTokens || 0;
+          const cTok = item.completionTokens || 0;
+          const tTok = pTok + cTok;
+
           db.run(
-            `INSERT INTO clients(ip, name, enabled, tool, category, userAgent, lastSeen, requestCount, notes, createdAt, updatedAt)
-             VALUES(?, ?, 1, ?, ?, ?, ?, ?, '', ?, ?)
+            `INSERT INTO clients(
+               ip, name, enabled, tool, category, userAgent, lastSeen, requestCount,
+               promptTokens, completionTokens, totalTokens,
+               tokenLimit, tokenLimitPeriod, tokensUsedCurrentPeriod, periodResetAt,
+               notes, createdAt, updatedAt
+             )
+             VALUES(?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'all', ?, 0, '', ?, ?)
              ON CONFLICT(ip) DO UPDATE SET
                tool = COALESCE(excluded.tool, clients.tool),
                category = COALESCE(excluded.category, clients.category),
                userAgent = COALESCE(excluded.userAgent, clients.userAgent),
                lastSeen = excluded.lastSeen,
                requestCount = clients.requestCount + excluded.requestCount,
+               promptTokens = COALESCE(clients.promptTokens, 0) + excluded.promptTokens,
+               completionTokens = COALESCE(clients.completionTokens, 0) + excluded.completionTokens,
+               totalTokens = COALESCE(clients.totalTokens, 0) + excluded.totalTokens,
+               tokensUsedCurrentPeriod = COALESCE(clients.tokensUsedCurrentPeriod, 0) + excluded.tokensUsedCurrentPeriod,
                updatedAt = excluded.updatedAt`,
             [
               item.ip,
@@ -143,7 +267,11 @@ function scheduleFlush() {
               item.category || "cli",
               item.userAgent || "",
               item.lastSeen || now,
-              item.count || 1,
+              item.count || 0,
+              pTok,
+              cTok,
+              tTok,
+              tTok,
               now,
               now,
             ]
@@ -151,39 +279,74 @@ function scheduleFlush() {
 
           try {
             db.run(
-              `INSERT INTO clientActivityTimeline(ip, minuteBucket, requestCount)
-               VALUES(?, ?, ?)
+              `INSERT INTO clientActivityTimeline(ip, minuteBucket, requestCount, promptTokens, completionTokens, totalTokens)
+               VALUES(?, ?, ?, ?, ?, ?)
                ON CONFLICT(ip, minuteBucket) DO UPDATE SET
-                 requestCount = clientActivityTimeline.requestCount + excluded.requestCount`,
-              [item.ip, minuteBucket, item.count || 1]
+                 requestCount = clientActivityTimeline.requestCount + excluded.requestCount,
+                 promptTokens = COALESCE(clientActivityTimeline.promptTokens, 0) + excluded.promptTokens,
+                 completionTokens = COALESCE(clientActivityTimeline.completionTokens, 0) + excluded.completionTokens,
+                 totalTokens = COALESCE(clientActivityTimeline.totalTokens, 0) + excluded.totalTokens`,
+              [item.ip, minuteBucket, item.count || 0, pTok, cTok, tTok]
             );
-          } catch {
-            // Table might not exist yet if migration pending
-          }
+          } catch {}
         }
       });
       syncClientsToJson().catch(() => {});
     } catch (e) {
       console.log("[clientsRepo] activity flush failed:", e.message);
     }
-  }, 1500);
+  }, 1000);
 }
 
-export function recordClientActivity(ip, { tool = "CLI Tool", category = "cli", userAgent = "" } = {}) {
+export function recordClientActivity(ip, { tool = "CLI Tool", category = "cli", userAgent = "", count = 1, promptTokens = 0, completionTokens = 0 } = {}) {
   if (!ip) return;
+  const cleanIp = normalizeIp(ip);
   const now = Date.now();
-  const existing = activityBuffer.get(ip) || { ip, count: 0, lastSeen: now, tool, category, userAgent };
-  existing.count += 1;
+  const existing = activityBuffer.get(cleanIp) || {
+    ip: cleanIp,
+    count: 0,
+    promptTokens: 0,
+    completionTokens: 0,
+    lastSeen: now,
+    tool,
+    category,
+    userAgent,
+  };
+
+  existing.count += (count || 0);
+  existing.promptTokens += (promptTokens || 0);
+  existing.completionTokens += (completionTokens || 0);
   existing.lastSeen = now;
   if (tool) existing.tool = tool;
   if (category) existing.category = category;
   if (userAgent) existing.userAgent = userAgent;
-  activityBuffer.set(ip, existing);
+
+  activityBuffer.set(cleanIp, existing);
+  scheduleFlush();
+}
+
+export function recordClientTokens(ip, promptTokens = 0, completionTokens = 0) {
+  if (!ip) return;
+  const cleanIp = normalizeIp(ip);
+  const now = Date.now();
+  const existing = activityBuffer.get(cleanIp) || {
+    ip: cleanIp,
+    count: 0,
+    promptTokens: 0,
+    completionTokens: 0,
+    lastSeen: now,
+  };
+
+  existing.promptTokens += (promptTokens || 0);
+  existing.completionTokens += (completionTokens || 0);
+  existing.lastSeen = now;
+
+  activityBuffer.set(cleanIp, existing);
   scheduleFlush();
 }
 
 /**
- * Get aggregated activity timeline for clients.
+ * Get aggregated activity timeline for clients including tokens.
  * @param {string} period - "1h" | "24h" | "7d"
  * @param {string} filterIp - "all" | specific IP
  */
@@ -197,7 +360,10 @@ export async function getClientActivityStats(period = "24h", filterIp = "all") {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       ip TEXT NOT NULL,
       minuteBucket INTEGER NOT NULL,
-      requestCount INTEGER DEFAULT 0
+      requestCount INTEGER DEFAULT 0,
+      promptTokens INTEGER DEFAULT 0,
+      completionTokens INTEGER DEFAULT 0,
+      totalTokens INTEGER DEFAULT 0
     )`);
     db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_cat_ip_bucket ON clientActivityTimeline(ip, minuteBucket)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_cat_bucket ON clientActivityTimeline(minuteBucket)`);
@@ -228,21 +394,28 @@ export async function getClientActivityStats(period = "24h", filterIp = "all") {
       timestamp: bucketStart,
       label: labelFn(bucketStart),
       requests: 0,
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
       activeClients: 0,
       clientBreakdown: {},
+      clientTokensBreakdown: {},
     };
   });
 
-  // Query recorded timeline
   let where = "WHERE minuteBucket >= ?";
   const params = [startTime];
   if (filterIp && filterIp !== "all") {
     where += " AND ip = ?";
-    params.push(filterIp);
+    params.push(normalizeIp(filterIp));
   }
 
   const rows = db.all(
-    `SELECT ip, minuteBucket, requestCount FROM clientActivityTimeline ${where} ORDER BY minuteBucket ASC`,
+    `SELECT ip, minuteBucket, requestCount, 
+            COALESCE(promptTokens, 0) as promptTokens, 
+            COALESCE(completionTokens, 0) as completionTokens, 
+            COALESCE(totalTokens, 0) as totalTokens 
+     FROM clientActivityTimeline ${where} ORDER BY minuteBucket ASC`,
     params
   );
 
@@ -251,19 +424,32 @@ export async function getClientActivityStats(period = "24h", filterIp = "all") {
     if (ts < startTime) continue;
     const idx = Math.min(Math.floor((ts - startTime) / bucketMs), bucketCount - 1);
     if (idx >= 0 && idx < bucketCount) {
-      buckets[idx].requests += r.requestCount || 0;
+      buckets[idx].requests += (r.requestCount || 0);
+      buckets[idx].promptTokens += (r.promptTokens || 0);
+      buckets[idx].completionTokens += (r.completionTokens || 0);
+      buckets[idx].totalTokens += (r.totalTokens || (r.promptTokens + r.completionTokens) || 0);
+
       buckets[idx].clientBreakdown[r.ip] = (buckets[idx].clientBreakdown[r.ip] || 0) + (r.requestCount || 0);
+      buckets[idx].clientTokensBreakdown[r.ip] = (buckets[idx].clientTokensBreakdown[r.ip] || 0) + (r.totalTokens || 0);
     }
   }
 
   // Include in-flight buffer memory
   const bufferItems = Array.from(activityBuffer.values());
   for (const item of bufferItems) {
-    if (filterIp && filterIp !== "all" && item.ip !== filterIp) continue;
+    if (filterIp && filterIp !== "all" && item.ip !== normalizeIp(filterIp)) continue;
     const idx = Math.min(Math.floor((now - startTime) / bucketMs), bucketCount - 1);
     if (idx >= 0 && idx < bucketCount) {
-      buckets[idx].requests += item.count || 0;
+      const p = item.promptTokens || 0;
+      const c = item.completionTokens || 0;
+      const t = p + c;
+      buckets[idx].requests += (item.count || 0);
+      buckets[idx].promptTokens += p;
+      buckets[idx].completionTokens += c;
+      buckets[idx].totalTokens += t;
+
       buckets[idx].clientBreakdown[item.ip] = (buckets[idx].clientBreakdown[item.ip] || 0) + (item.count || 0);
+      buckets[idx].clientTokensBreakdown[item.ip] = (buckets[idx].clientTokensBreakdown[item.ip] || 0) + t;
     }
   }
 

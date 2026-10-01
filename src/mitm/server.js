@@ -10,7 +10,7 @@ const { log, err, dumpRequest, createResponseDumper, clearDumpDir } = require(".
 const { IS_DEV, LSOF_BIN, listeningPids, TARGET_HOSTS, URL_PATTERNS, MODEL_SYNONYMS, MODEL_PATTERNS, MODEL_NO_MAP, getToolForHost, isChatRequest, extractModel } = require("./config");
 const { DATA_DIR, MITM_DIR } = require("./paths");
 const { generateCert, getCertForDomain } = require("./cert/generate");
-const { getMitmAlias, isClientEnabled } = require("./dbReader");
+const { getMitmAlias, isClientEnabled, checkMitmClientAccess } = require("./dbReader");
 const { applyAntigravityIdeVersionOverride } = require("./antigravityIdeVersion");
 const LOCAL_PORT = 443;
 const IS_WIN = process.platform === "win32";
@@ -358,6 +358,11 @@ const server = https.createServer(sslOptions, async (req, res) => {
     const clientIp = rawIp.replace(/^::ffff:/, "").trim() || "127.0.0.1";
     const tool = getToolForHost(req.headers.host);
 
+    // Stamp real client IP into forwarded headers so 9Router router detects exact client
+    req.headers["x-9r-real-ip"] = clientIp;
+    req.headers["x-real-ip"] = clientIp;
+    req.headers["x-forwarded-for"] = clientIp;
+
     // Track active connection
     const now = Date.now();
     const existing = activeClientsMap.get(clientIp) || { ip: clientIp, count: 0, firstSeen: now };
@@ -367,10 +372,18 @@ const server = https.createServer(sslOptions, async (req, res) => {
     existing.lastHost = req.headers.host;
     activeClientsMap.set(clientIp, existing);
 
-    // Client connection rule check: if client is disabled, bypass to native upstream
-    if (!isClientEnabled(clientIp)) {
-      log(`🛑 [mitm] Client ${clientIp} is DISABLED in 9Router -> passthrough directly to default upstream`);
-      return passthrough(req, res, bodyBuffer);
+    // Client access and quota check
+    const access = typeof checkMitmClientAccess === "function" 
+      ? checkMitmClientAccess(clientIp) 
+      : { allowed: isClientEnabled(clientIp) };
+
+    if (!access.allowed) {
+      log(`🛑 [mitm] Client ${clientIp} blocked: ${access.reason || "disabled"}`);
+      if (!res.headersSent) {
+        res.writeHead(403, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: { message: access.reason || `Client IP ${clientIp} is disabled in 9Router`, type: "client_quota_or_disabled" } }));
+      }
+      return;
     }
 
     if (!tool) return passthrough(req, res, bodyBuffer);
@@ -470,3 +483,32 @@ const shutdown = () => {
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
 if (process.platform === "win32") process.on("SIGBREAK", shutdown);
+
+// ── Periodic Sync of Active MITM Clients to 9Router DB ────────
+const ROUTER_HTTP_PORT = process.env.PORT || 20128;
+setInterval(() => {
+  if (activeClientsMap.size === 0) return;
+  try {
+    const clientsObj = {};
+    for (const [ip, data] of activeClientsMap.entries()) {
+      clientsObj[ip] = data;
+    }
+    const payload = JSON.stringify({ clients: clientsObj });
+    const http = require("http");
+    const postReq = http.request({
+      hostname: "127.0.0.1",
+      port: ROUTER_HTTP_PORT,
+      path: "/api/clients/track-batch",
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(payload),
+        "x-request-source": "local"
+      },
+      timeout: 3000
+    }, () => {});
+    postReq.on("error", () => {});
+    postReq.write(payload);
+    postReq.end();
+  } catch {}
+}, 10000);

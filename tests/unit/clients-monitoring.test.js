@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { upsertClient, getClientByIp, toggleClient, deleteClient, getAllClients } from "@/lib/db/repos/clientsRepo.js";
+import { upsertClient, getClientByIp, toggleClient, deleteClient, getAllClients, resetClientUsage } from "@/lib/db/repos/clientsRepo.js";
 import { isClientIpAllowed, trackIncomingRequest, detectToolFromRequest } from "@/lib/clients/clientTracker.js";
 import { isClientEnabled } from "@/mitm/dbReader.js";
 
@@ -108,6 +108,45 @@ describe("Client Connections Monitoring & On/Off Control", () => {
       },
     };
     expect(extractClientIp(reqWithRealIp)).toBe("10.10.123.147");
+  });
+
+  it("should enforce token limit and block requests once limit is exceeded", async () => {
+    const { checkClientAccess } = await import("@/lib/clients/clientTracker.js");
+    const { isClientEnabled } = require("../../src/mitm/dbReader.js");
+
+    // Client with 1000 token limit
+    await upsertClient({
+      ip: TEST_IP,
+      name: "Quota Limited Station",
+      enabled: true,
+      tokenLimit: 1000,
+      tokenLimitPeriod: "daily",
+      tokensUsedCurrentPeriod: 500,
+      totalTokens: 500,
+    });
+
+    let access = checkClientAccess(TEST_IP);
+    expect(access.allowed).toBe(true);
+    expect(isClientEnabled(TEST_IP)).toBe(true);
+
+    // Update used tokens to exceed limit
+    await upsertClient({
+      ip: TEST_IP,
+      tokenLimit: 1000,
+      tokensUsedCurrentPeriod: 1200,
+      totalTokens: 1200,
+    });
+
+    access = checkClientAccess(TEST_IP);
+    expect(access.allowed).toBe(false);
+    expect(access.reason).toContain("reached token quota limit");
+    expect(isClientEnabled(TEST_IP)).toBe(false);
+
+    // Reset usage clears the block
+    await resetClientUsage(TEST_IP);
+    access = checkClientAccess(TEST_IP);
+    expect(access.allowed).toBe(true);
+    expect(isClientEnabled(TEST_IP)).toBe(true);
   });
 });
 

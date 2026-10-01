@@ -1,17 +1,7 @@
 import { readClientsCache } from "../mitmClientCache.js";
-import { recordClientActivity } from "../db/repos/clientsRepo.js";
+import { recordClientActivity, normalizeIp } from "../db/repos/clientsRepo.js";
 
-export function normalizeIp(rawIp) {
-  if (!rawIp) return "127.0.0.1";
-  let ip = String(rawIp).trim();
-  if (ip.startsWith("::ffff:")) {
-    ip = ip.substring(7);
-  }
-  if (ip === "::1") {
-    ip = "127.0.0.1";
-  }
-  return ip;
-}
+export { normalizeIp };
 
 export function extractClientIp(request) {
   if (!request) return "127.0.0.1";
@@ -128,14 +118,29 @@ export function detectToolFromRequest(request, body = null) {
   };
 }
 
-export function isClientIpAllowed(ip) {
+export function checkClientAccess(ip) {
   const normalized = normalizeIp(ip);
   const cache = readClientsCache();
   const rule = cache[normalized];
-  if (rule && rule.enabled === false) {
-    return false;
+  if (rule) {
+    if (rule.enabled === false) {
+      return { allowed: false, reason: `Client IP ${normalized} is disabled in 9Router connection settings` };
+    }
+    if (rule.tokenLimit > 0) {
+      const used = rule.tokensUsedCurrentPeriod != null ? Number(rule.tokensUsedCurrentPeriod) : Number(rule.totalTokens || 0);
+      if (used >= rule.tokenLimit) {
+        return { 
+          allowed: false, 
+          reason: `Client IP ${normalized} has reached token quota limit (${used.toLocaleString()} / ${rule.tokenLimit.toLocaleString()} tokens)` 
+        };
+      }
+    }
   }
-  return true;
+  return { allowed: true, reason: "" };
+}
+
+export function isClientIpAllowed(ip) {
+  return checkClientAccess(ip).allowed;
 }
 
 export function trackIncomingRequest(request, body = null) {
@@ -146,5 +151,6 @@ export function trackIncomingRequest(request, body = null) {
     : request?.headers?.["user-agent"]) || "";
 
   recordClientActivity(ip, { tool, category, userAgent: ua });
-  return { ip, tool, category, allowed: isClientIpAllowed(ip) };
+  const access = checkClientAccess(ip);
+  return { ip, tool, category, allowed: access.allowed, reason: access.reason };
 }

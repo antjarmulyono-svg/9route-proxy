@@ -4,26 +4,32 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 
-const DATA_DIR = process.env.DATA_DIR
-  || (process.platform === "win32"
-    ? path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "9router")
-    : path.join(os.homedir(), ".9router"));
+function getDataDir() {
+  return process.env.DATA_DIR
+    || (process.platform === "win32"
+      ? path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "9router")
+      : path.join(os.homedir(), ".9router"));
+}
 
-const CACHE_FILE = path.join(DATA_DIR, "mitm", "clients.json");
+function getCacheFile() {
+  return path.join(getDataDir(), "mitm", "clients.json");
+}
 
 function writeAtomic(data) {
-  const dir = path.dirname(CACHE_FILE);
+  const cacheFile = getCacheFile();
+  const dir = path.dirname(cacheFile);
   fs.mkdirSync(dir, { recursive: true });
-  const tmp = `${CACHE_FILE}.tmp.${Date.now()}`;
+  const tmp = `${cacheFile}.tmp.${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf8");
-  fs.renameSync(tmp, CACHE_FILE);
+  fs.renameSync(tmp, cacheFile);
 }
 
 // Read raw cache (safe for sync / fallback)
 export function readClientsCache() {
   try {
-    if (!fs.existsSync(CACHE_FILE)) return {};
-    return JSON.parse(fs.readFileSync(CACHE_FILE, "utf8")) || {};
+    const cacheFile = getCacheFile();
+    if (!fs.existsSync(cacheFile)) return {};
+    return JSON.parse(fs.readFileSync(cacheFile, "utf8")) || {};
   } catch {
     return {};
   }
@@ -41,6 +47,11 @@ export async function syncClientsToJson() {
         name: c.name || "",
         tool: c.tool || "",
         lastSeen: c.lastSeen || 0,
+        tokenLimit: c.tokenLimit || 0,
+        tokenLimitPeriod: c.tokenLimitPeriod || "all",
+        tokensUsedCurrentPeriod: c.tokensUsedCurrentPeriod || 0,
+        totalTokens: c.totalTokens || 0,
+        periodResetAt: c.periodResetAt || 0,
       };
     }
     writeAtomic(map);
@@ -50,13 +61,14 @@ export async function syncClientsToJson() {
 }
 
 // Update single client rule in cache immediately
-export function writeClientRule(ip, enabled, name = "") {
+export function writeClientRule(ip, enabled, name = "", extra = {}) {
   try {
     const current = readClientsCache();
     current[ip] = {
       ...(current[ip] || {}),
       enabled: Boolean(enabled),
       ...(name ? { name } : {}),
+      ...extra,
       updatedAt: Date.now(),
     };
     writeAtomic(current);
@@ -77,4 +89,3 @@ export function deleteClientRule(ip) {
     console.log("[mitmClientCache] delete rule failed:", e.message);
   }
 }
-

@@ -55,8 +55,12 @@ export async function handleChat(request, clientRawRequest = null) {
   // Client IP tracking & access enforcement
   const clientInfo = trackIncomingRequest(request, body);
   if (!clientInfo.allowed) {
-    log.warn("AUTH", `Client IP ${clientInfo.ip} is disabled in 9Router`);
-    return errorResponse(HTTP_STATUS.FORBIDDEN, `Client IP ${clientInfo.ip} is disabled in 9Router connection settings`);
+    const reason = clientInfo.reason || `Client IP ${clientInfo.ip} is disabled in 9Router connection settings`;
+    log.warn("AUTH", reason);
+    return errorResponse(HTTP_STATUS.FORBIDDEN, reason);
+  }
+  if (clientRawRequest) {
+    clientRawRequest.clientIp = clientInfo.ip;
   }
 
   // Request summary is emitted as the unified "▶" line in chatCore (has fmt/thinking/account)

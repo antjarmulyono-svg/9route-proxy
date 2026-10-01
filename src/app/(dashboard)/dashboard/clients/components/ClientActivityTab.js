@@ -9,8 +9,9 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
+  Legend,
 } from "recharts";
-import { Card, Button, Badge } from "@/shared/components";
+import { Card, Button, SegmentedControl } from "@/shared/components";
 import { useNotificationStore } from "@/store/notificationStore";
 
 const PERIODS = [
@@ -19,9 +20,18 @@ const PERIODS = [
   { value: "7d", label: "7 Days" },
 ];
 
+function formatTokens(num) {
+  const n = Number(num) || 0;
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return n.toLocaleString();
+}
+
 export default function ClientActivityTab() {
   const [period, setPeriod] = useState("24h");
   const [selectedIp, setSelectedIp] = useState("all");
+  const [viewMetric, setViewMetric] = useState("tokens"); // 'tokens' or 'requests'
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const { addNotification } = useNotificationStore();
@@ -72,6 +82,9 @@ export default function ClientActivityTab() {
     return data.stats.buckets.map((b) => ({
       label: b.label,
       requests: b.requests || 0,
+      promptTokens: b.promptTokens || 0,
+      completionTokens: b.completionTokens || 0,
+      totalTokens: b.totalTokens || ((b.promptTokens || 0) + (b.completionTokens || 0)),
       activeClients: b.activeClients || 0,
     }));
   }, [data]);
@@ -80,8 +93,24 @@ export default function ClientActivityTab() {
     return chartData.reduce((acc, cur) => acc + (cur.requests || 0), 0);
   }, [chartData]);
 
+  const totalPromptTokens = useMemo(() => {
+    return chartData.reduce((acc, cur) => acc + (cur.promptTokens || 0), 0);
+  }, [chartData]);
+
+  const totalCompletionTokens = useMemo(() => {
+    return chartData.reduce((acc, cur) => acc + (cur.completionTokens || 0), 0);
+  }, [chartData]);
+
+  const totalTokens = useMemo(() => {
+    return totalPromptTokens + totalCompletionTokens;
+  }, [totalPromptTokens, totalCompletionTokens]);
+
   const maxRequests = useMemo(() => {
     return Math.max(0, ...chartData.map((d) => d.requests));
+  }, [chartData]);
+
+  const maxTokens = useMemo(() => {
+    return Math.max(0, ...chartData.map((d) => d.totalTokens));
   }, [chartData]);
 
   const clientsList = data?.clients || [];
@@ -109,6 +138,32 @@ export default function ClientActivityTab() {
                 </option>
               ))}
             </select>
+          </div>
+
+          {/* Metric View Toggle */}
+          <div className="flex items-center gap-1 bg-surface-2 p-0.5 rounded-lg border border-border-subtle">
+            <button
+              onClick={() => setViewMetric("tokens")}
+              className={`px-2.5 py-1 text-xs rounded font-medium flex items-center gap-1 transition-colors ${
+                viewMetric === "tokens"
+                  ? "bg-primary text-white shadow-sm"
+                  : "text-text-muted hover:text-text-main"
+              }`}
+            >
+              <span className="material-symbols-outlined text-[14px]">token</span>
+              Token Consumption
+            </button>
+            <button
+              onClick={() => setViewMetric("requests")}
+              className={`px-2.5 py-1 text-xs rounded font-medium flex items-center gap-1 transition-colors ${
+                viewMetric === "requests"
+                  ? "bg-primary text-white shadow-sm"
+                  : "text-text-muted hover:text-text-main"
+              }`}
+            >
+              <span className="material-symbols-outlined text-[14px]">analytics</span>
+              Request Volume
+            </button>
           </div>
 
           {/* Period Selection */}
@@ -146,48 +201,101 @@ export default function ClientActivityTab() {
       </div>
 
       {/* Metric Cards for this period */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <Card className="p-4 border-border-subtle bg-surface-1 flex items-center justify-between">
-          <div>
-            <p className="text-xs font-medium text-text-muted">Total Requests ({period})</p>
-            <p className="text-2xl font-bold text-text-main mt-1">{totalPeriodRequests.toLocaleString()}</p>
-          </div>
-          <div className="size-10 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
-            <span className="material-symbols-outlined text-[20px]">ssid_chart</span>
-          </div>
-        </Card>
+      {viewMetric === "tokens" ? (
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+          <Card className="p-4 border-border-subtle bg-surface-1 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-medium text-text-muted">Total Tokens ({period})</p>
+              <p className="text-2xl font-bold text-emerald-500 mt-1">{formatTokens(totalTokens)}</p>
+              <p className="text-[11px] text-text-muted mt-0.5">{totalTokens.toLocaleString()} tokens</p>
+            </div>
+            <div className="size-10 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+              <span className="material-symbols-outlined text-[20px]">token</span>
+            </div>
+          </Card>
 
-        <Card className="p-4 border-border-subtle bg-surface-1 flex items-center justify-between">
-          <div>
-            <p className="text-xs font-medium text-text-muted">Peak Activity Spike</p>
-            <p className="text-2xl font-bold text-amber-500 mt-1">{maxRequests.toLocaleString()} reqs</p>
-          </div>
-          <div className="size-10 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center">
-            <span className="material-symbols-outlined text-[20px]">trending_up</span>
-          </div>
-        </Card>
+          <Card className="p-4 border-border-subtle bg-surface-1 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-medium text-text-muted">Prompt / Input Tokens</p>
+              <p className="text-2xl font-bold text-text-main mt-1">{formatTokens(totalPromptTokens)}</p>
+              <p className="text-[11px] text-text-muted mt-0.5">{totalTokens ? Math.round((totalPromptTokens / totalTokens) * 100) : 0}% of total</p>
+            </div>
+            <div className="size-10 rounded-xl bg-teal-500/10 text-teal-600 dark:text-teal-400 flex items-center justify-center">
+              <span className="material-symbols-outlined text-[20px]">input</span>
+            </div>
+          </Card>
 
-        <Card className="p-4 border-border-subtle bg-surface-1 flex items-center justify-between">
-          <div>
-            <p className="text-xs font-medium text-text-muted">Connected Machines</p>
-            <p className="text-2xl font-bold text-emerald-500 mt-1">{clientsList.length}</p>
-          </div>
-          <div className="size-10 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-            <span className="material-symbols-outlined text-[20px]">lan</span>
-          </div>
-        </Card>
-      </div>
+          <Card className="p-4 border-border-subtle bg-surface-1 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-medium text-text-muted">Completion / Output Tokens</p>
+              <p className="text-2xl font-bold text-blue-500 mt-1">{formatTokens(totalCompletionTokens)}</p>
+              <p className="text-[11px] text-text-muted mt-0.5">{totalTokens ? Math.round((totalCompletionTokens / totalTokens) * 100) : 0}% of total</p>
+            </div>
+            <div className="size-10 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+              <span className="material-symbols-outlined text-[20px]">output</span>
+            </div>
+          </Card>
+
+          <Card className="p-4 border-border-subtle bg-surface-1 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-medium text-text-muted">Peak Token Bucket</p>
+              <p className="text-2xl font-bold text-amber-500 mt-1">{formatTokens(maxTokens)}</p>
+              <p className="text-[11px] text-text-muted mt-0.5">highest single bucket</p>
+            </div>
+            <div className="size-10 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center">
+              <span className="material-symbols-outlined text-[20px]">trending_up</span>
+            </div>
+          </Card>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <Card className="p-4 border-border-subtle bg-surface-1 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-medium text-text-muted">Total Requests ({period})</p>
+              <p className="text-2xl font-bold text-text-main mt-1">{totalPeriodRequests.toLocaleString()}</p>
+            </div>
+            <div className="size-10 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+              <span className="material-symbols-outlined text-[20px]">ssid_chart</span>
+            </div>
+          </Card>
+
+          <Card className="p-4 border-border-subtle bg-surface-1 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-medium text-text-muted">Peak Activity Spike</p>
+              <p className="text-2xl font-bold text-amber-500 mt-1">{maxRequests.toLocaleString()} reqs</p>
+            </div>
+            <div className="size-10 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center">
+              <span className="material-symbols-outlined text-[20px]">trending_up</span>
+            </div>
+          </Card>
+
+          <Card className="p-4 border-border-subtle bg-surface-1 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-medium text-text-muted">Connected Machines</p>
+              <p className="text-2xl font-bold text-emerald-500 mt-1">{clientsList.length}</p>
+            </div>
+            <div className="size-10 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+              <span className="material-symbols-outlined text-[20px]">lan</span>
+            </div>
+          </Card>
+        </div>
+      )}
 
       {/* Main Interactive Chart */}
       <Card className="p-4 border-border-subtle bg-surface-1 flex flex-col gap-4">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-sm font-semibold text-text-main flex items-center gap-2">
-              <span className="material-symbols-outlined text-primary text-[18px]">area_chart</span>
-              Traffic & Activity Trend ({selectedIp === "all" ? "All Connected Clients" : selectedIp})
+              <span className="material-symbols-outlined text-primary text-[18px]">
+                {viewMetric === "tokens" ? "token" : "area_chart"}
+              </span>
+              {viewMetric === "tokens" ? "Token Consumption Timeline" : "Traffic & Activity Trend"} (
+              {selectedIp === "all" ? "All Connected Clients" : selectedIp})
             </h2>
             <p className="text-xs text-text-muted mt-0.5">
-              Visualisasi naik turun volume request secara aktif berdasarkan interval waktu.
+              {viewMetric === "tokens"
+                ? "Breakdown per-bucket input (prompt) vs output (completion) tokens secara realtime."
+                : "Visualisasi naik turun volume request secara aktif berdasarkan interval waktu."}
             </p>
           </div>
         </div>
@@ -201,121 +309,121 @@ export default function ClientActivityTab() {
             No activity recorded for this period.
           </div>
         ) : (
-          <div className="w-full h-72">
+          <div className="w-full h-80">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="clientTraffic" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.4} />
-                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.15} />
-                <XAxis
-                  dataKey="label"
-                  tick={{ fontSize: 10, fill: "currentColor", fillOpacity: 0.6 }}
-                  tickLine={false}
-                  axisLine={false}
-                  interval="preserveStartEnd"
-                />
-                <YAxis
-                  tick={{ fontSize: 10, fill: "currentColor", fillOpacity: 0.6 }}
-                  tickLine={false}
-                  axisLine={false}
-                  allowDecimals={false}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "rgba(24, 24, 27, 0.95)",
-                    borderColor: "rgba(63, 63, 70, 0.4)",
-                    borderRadius: "8px",
-                    fontSize: "12px",
-                    boxShadow: "0 4px 12px rgba(0,0,0,0.5)",
-                  }}
-                  itemStyle={{ color: "#60a5fa" }}
-                  labelStyle={{ color: "#a1a1aa", fontWeight: 600, marginBottom: "4px" }}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="requests"
-                  name="Requests"
-                  stroke="#3b82f6"
-                  strokeWidth={2}
-                  fillOpacity={1}
-                  fill="url(#clientTraffic)"
-                  activeDot={{ r: 5, fill: "#3b82f6", stroke: "#fff", strokeWidth: 2 }}
-                />
-              </AreaChart>
+              {viewMetric === "tokens" ? (
+                <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="promptColor" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.4} />
+                      <stop offset="95%" stopColor="#10b981" stopOpacity={0.0} />
+                    </linearGradient>
+                    <linearGradient id="completionColor" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.4} />
+                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.15} />
+                  <XAxis
+                    dataKey="label"
+                    tick={{ fontSize: 10, fill: "currentColor", fillOpacity: 0.6 }}
+                    tickLine={false}
+                    axisLine={false}
+                    interval="preserveStartEnd"
+                  />
+                  <YAxis
+                    tick={{ fontSize: 10, fill: "currentColor", fillOpacity: 0.6 }}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={formatTokens}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "rgba(24, 24, 27, 0.95)",
+                      borderColor: "rgba(63, 63, 70, 0.4)",
+                      borderRadius: "8px",
+                      fontSize: "12px",
+                      boxShadow: "0 4px 12px rgba(0,0,0,0.5)",
+                    }}
+                    formatter={(val, name) => [
+                      formatTokens(val) + " tokens",
+                      name === "promptTokens" ? "Prompt / Input" : name === "completionTokens" ? "Completion / Output" : "Total Tokens",
+                    ]}
+                    labelStyle={{ color: "#a1a1aa", fontWeight: 600, marginBottom: "4px" }}
+                  />
+                  <Legend
+                    verticalAlign="top"
+                    align="right"
+                    wrapperStyle={{ paddingBottom: "10px", fontSize: "11px" }}
+                  />
+                  <Area
+                    type="monotone"
+                    name="Prompt (Input)"
+                    dataKey="promptTokens"
+                    stroke="#10b981"
+                    strokeWidth={2}
+                    fillOpacity={1}
+                    fill="url(#promptColor)"
+                    stackId="1"
+                  />
+                  <Area
+                    type="monotone"
+                    name="Completion (Output)"
+                    dataKey="completionTokens"
+                    stroke="#3b82f6"
+                    strokeWidth={2}
+                    fillOpacity={1}
+                    fill="url(#completionColor)"
+                    stackId="1"
+                  />
+                </AreaChart>
+              ) : (
+                <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="clientTraffic" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.4} />
+                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.15} />
+                  <XAxis
+                    dataKey="label"
+                    tick={{ fontSize: 10, fill: "currentColor", fillOpacity: 0.6 }}
+                    tickLine={false}
+                    axisLine={false}
+                    interval="preserveStartEnd"
+                  />
+                  <YAxis
+                    tick={{ fontSize: 10, fill: "currentColor", fillOpacity: 0.6 }}
+                    tickLine={false}
+                    axisLine={false}
+                    allowDecimals={false}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "rgba(24, 24, 27, 0.95)",
+                      borderColor: "rgba(63, 63, 70, 0.4)",
+                      borderRadius: "8px",
+                      fontSize: "12px",
+                      boxShadow: "0 4px 12px rgba(0,0,0,0.5)",
+                    }}
+                    itemStyle={{ color: "#60a5fa" }}
+                    labelStyle={{ color: "#a1a1aa", fontWeight: 600, marginBottom: "4px" }}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="requests"
+                    name="Requests"
+                    stroke="#3b82f6"
+                    strokeWidth={2}
+                    fillOpacity={1}
+                    fill="url(#clientTraffic)"
+                  />
+                </AreaChart>
+              )}
             </ResponsiveContainer>
           </div>
         )}
-      </Card>
-
-      {/* Client Overview List */}
-      <Card className="p-0 border-border-subtle bg-surface-1 overflow-hidden">
-        <div className="p-3.5 border-b border-border-subtle bg-surface-2/40 flex items-center justify-between">
-          <span className="text-xs font-semibold text-text-main flex items-center gap-1.5">
-            <span className="material-symbols-outlined text-[16px] text-primary">pie_chart</span>
-            Client Breakdown
-          </span>
-          <span className="text-[11px] text-text-muted">Total {clientsList.length} clients registered</span>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="border-b border-border-subtle bg-surface-2/20 text-text-muted font-medium text-[11px] uppercase tracking-wider">
-                <th className="py-2.5 px-4">Client IP</th>
-                <th className="py-2.5 px-4">Alias / Machine</th>
-                <th className="py-2.5 px-4">Category</th>
-                <th className="py-2.5 px-4">Active Tool</th>
-                <th className="py-2.5 px-4 text-right">Lifetime Requests</th>
-                <th className="py-2.5 px-4 text-center">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border-subtle/40">
-              {clientsList.map((client) => {
-                const isSelected = selectedIp === client.ip;
-                return (
-                  <tr
-                    key={client.ip}
-                    className={`hover:bg-surface-2/30 transition-colors ${isSelected ? "bg-primary/5" : ""}`}
-                  >
-                    <td className="py-2.5 px-4 font-mono font-medium text-text-main">
-                      {client.ip}
-                    </td>
-                    <td className="py-2.5 px-4 text-text-muted">
-                      {client.name || "—"}
-                    </td>
-                    <td className="py-2.5 px-4">
-                      <span className="capitalize text-[11px] text-text-muted px-2 py-0.5 rounded bg-surface-2">
-                        {client.category || "cli"}
-                      </span>
-                    </td>
-                    <td className="py-2.5 px-4 text-text-muted">
-                      {client.tool || "—"}
-                    </td>
-                    <td className="py-2.5 px-4 text-right font-mono font-medium text-text-main">
-                      {(client.requestCount || 0).toLocaleString()}
-                    </td>
-                    <td className="py-2.5 px-4 text-center">
-                      <button
-                        onClick={() => setSelectedIp(isSelected ? "all" : client.ip)}
-                        className={`px-2 py-1 text-[11px] rounded font-medium transition-colors ${
-                          isSelected
-                            ? "bg-primary text-white"
-                            : "text-text-muted hover:text-text-main hover:bg-surface-2 border border-border-subtle"
-                        }`}
-                      >
-                        {isSelected ? "Selected" : "View Graph"}
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
       </Card>
     </div>
   );

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import https from "https";
-import { getAllClients, getClientByIp, upsertClient, deleteClient } from "@/lib/db/repos/clientsRepo.js";
+import { getAllClients, getClientByIp, upsertClient, deleteClient, resetClientUsage } from "@/lib/db/repos/clientsRepo.js";
 import { syncClientsToJson } from "@/lib/mitmClientCache.js";
 
 async function fetchMitmActiveClients() {
@@ -29,7 +29,7 @@ async function fetchMitmActiveClients() {
   });
 }
 
-// GET - List all clients with merged live stats
+// GET - List all clients with merged live stats and token usage
 export async function GET() {
   try {
     const dbClients = await getAllClients();
@@ -48,18 +48,26 @@ export async function GET() {
       if (existing) {
         existing.isLive = isLive;
         existing.lastSeen = Math.max(existing.lastSeen || 0, liveData.lastSeen || 0);
-        existing.tool = liveData.tool ? `${liveData.tool.toUpperCase()} (MITM)` : existing.tool;
-        existing.category = "mitm";
+        if (!existing.tool || existing.tool === "Unknown") {
+          existing.tool = liveData.tool ? `${liveData.tool.toUpperCase()} (MITM)` : existing.tool;
+        }
       } else {
         clientMap.set(ip, {
           ip,
           name: "",
           enabled: true,
-          tool: liveData.tool ? `${liveData.tool.toUpperCase()} (MITM)` : "MITM Tool",
+          tool: liveData.tool ? `${liveData.tool.toUpperCase()} (MITM)` : "Antigravity IDE",
           category: "mitm",
-          userAgent: "",
+          userAgent: liveData.lastHost || "",
           lastSeen: liveData.lastSeen || now,
-          requestCount: liveData.count || 1,
+          requestCount: liveData.count || 0,
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
+          tokenLimit: 0,
+          tokenLimitPeriod: "all",
+          tokensUsedCurrentPeriod: 0,
+          periodResetAt: 0,
           notes: "",
           isLive,
           createdAt: liveData.firstSeen || now,
@@ -76,12 +84,17 @@ export async function GET() {
   }
 }
 
-// POST - Create or update client details
+// POST - Create or update client details and token limits
 export async function POST(request) {
   try {
     const body = await request.json();
     if (!body || !body.ip) {
       return NextResponse.json({ ok: false, error: "IP address is required" }, { status: 400 });
+    }
+
+    if (body.resetUsage) {
+      const reset = await resetClientUsage(body.ip);
+      return NextResponse.json({ ok: true, client: reset, message: "Usage reset successfully" });
     }
 
     const saved = await upsertClient(body);

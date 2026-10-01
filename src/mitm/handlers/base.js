@@ -22,6 +22,11 @@ async function fetchRouter(openaiBody, path = "/v1/chat/completions", clientHead
     if (!STRIP_HEADERS.has(k.toLowerCase())) forwarded[k] = v;
   }
 
+  // Preserve real client IP for accurate multi-client accounting in 9Router
+  if (clientHeaders["x-9r-real-ip"]) forwarded["x-9r-real-ip"] = clientHeaders["x-9r-real-ip"];
+  if (clientHeaders["x-real-ip"]) forwarded["x-real-ip"] = clientHeaders["x-real-ip"];
+  if (clientHeaders["x-forwarded-for"]) forwarded["x-forwarded-for"] = clientHeaders["x-forwarded-for"];
+
   const reqHeaders = {
     ...forwarded,
     "Content-Type": "application/json",
