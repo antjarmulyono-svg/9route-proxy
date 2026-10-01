@@ -24,6 +24,8 @@ import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { getProjectIdForConnection } from "open-sse/services/projectId.js";
 import { trackIncomingRequest } from "@/lib/clients/clientTracker.js";
+import { getClientSessionKey } from "open-sse/utils/sessionManager.js";
+import { getPinnedConnectionId, pinConnectionId } from "../services/accountAffinity.js";
 
 /**
  * Handle chat completion request
@@ -232,13 +234,25 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
   // Extract userAgent from request
   const userAgent = request?.headers?.get("user-agent") || "";
 
+  // Pin this conversation to one account: rotating mid-conversation invalidates
+  // per-project thought signatures ("Corrupted thought signature" on Antigravity).
+  // Null when the client sent no conversation id — then nothing is pinned.
+  // Plain object, not the Headers instance: headerValue() reads by bracket access,
+  // which a Fetch Headers object silently answers as undefined.
+  const sessionHeaders = request?.headers ? Object.fromEntries(request.headers) : {};
+  const sessionKey = getClientSessionKey({ headers: sessionHeaders, body, scope: provider });
+  const pinnedConnectionId = getPinnedConnectionId(provider, sessionKey);
+
   // Try with available accounts (fallback on errors)
   const excludeConnectionIds = new Set();
   let lastError = null;
   let lastStatus = null;
 
   while (true) {
-    const credentials = await getProviderCredentials(provider, excludeConnectionIds, model);
+    // Only honour the pin on the first attempt — once fallback has excluded accounts,
+    // an unavailable pinned account must not keep being re-selected.
+    const preferredConnectionId = excludeConnectionIds.size === 0 ? pinnedConnectionId : null;
+    const credentials = await getProviderCredentials(provider, excludeConnectionIds, model, { preferredConnectionId });
 
     // All accounts unavailable
     if (!credentials || credentials.allRateLimited) {
@@ -314,7 +328,11 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       }
     });
 
-    if (result.success) return result.response;
+    if (result.success) {
+      // Follow the pin to whoever actually served the turn, so the next turn stays here.
+      pinConnectionId(provider, sessionKey, credentials.connectionId);
+      return result.response;
+    }
 
     // Antigravity 409/429: refresh live quota to get exact resetAt before locking
     let quotaResetMs = null;

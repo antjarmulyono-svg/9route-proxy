@@ -224,6 +224,19 @@ export function resolveSessionId(opts = {}) {
     return resolveSessionIdentity(opts).sessionId;
 }
 
+/**
+ * The conversation id the client itself supplied, or null when it supplied none.
+ *
+ * Unlike resolveSessionIdentity() this never falls back to a derived id: account
+ * affinity must not pin anything when the caller cannot prove which conversation a
+ * request belongs to, or every unattributed request would land on one account.
+ *
+ * @returns {string|null}
+ */
+export function getClientSessionKey({ headers, body, scope = "" } = {}) {
+    return extractClientSessionId(headers, body, scope) || null;
+}
+
 export function resolveContinuationId({ sessionId, connectionId, scope = "", ephemeral = false } = {}) {
     if (ephemeral) return crypto.randomUUID();
     const key = `${scope}:${connectionId || ""}:${sessionId || ""}`;
