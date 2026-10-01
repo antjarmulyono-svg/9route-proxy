@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSettings, validateApiKey } from "@/lib/localDb";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
-import { verifyDashboardAuthToken } from "@/lib/auth/dashboardSession";
+import { verifyDashboardAuthToken, verifyDashboardAuthSession } from "@/lib/auth/dashboardSession";
 import { hasTrustedPeerHeaders } from "@/lib/auth/trustedPeer";
 
 const CLI_TOKEN_HEADER = "x-9r-cli-token";
@@ -216,9 +216,9 @@ async function canAccessLocalOnlyRoute(request) {
   return isLocalRequest(request) && (await isAuthenticated(request));
 }
 
-async function hasValidToken(request) {
+async function hasValidToken(request, options = {}) {
   const token = request.cookies.get("auth_token")?.value;
-  return await verifyDashboardAuthToken(token);
+  return await verifyDashboardAuthToken(token, options);
 }
 
 // Read settings directly from DB to avoid self-fetch deadlock in proxy
@@ -308,13 +308,19 @@ export async function proxy(request) {
     // If login not required, allow through
     if (!requireLogin) return NextResponse.next();
 
-    // Verify JWT token
+    // Verify JWT token & check session idle timeout
     const token = request.cookies.get("auth_token")?.value;
     if (token) {
-      if (await verifyDashboardAuthToken(token)) {
+      const idleMinutes = settings?.sessionIdleTimeoutMinutes ?? 30;
+      const maxIdleSeconds = idleMinutes > 0 ? idleMinutes * 60 : 0;
+      const sessionResult = await verifyDashboardAuthSession(token, { maxIdleSeconds });
+      if (sessionResult.valid) {
         return NextResponse.next();
       } else {
-        return NextResponse.redirect(new URL("/login", request.url));
+        const reason = sessionResult.reason === "idle" ? "?reason=idle" : "";
+        const redirectRes = NextResponse.redirect(new URL(`/login${reason}`, request.url));
+        redirectRes.cookies.delete("auth_token");
+        return redirectRes;
       }
     }
 

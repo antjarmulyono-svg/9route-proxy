@@ -337,6 +337,22 @@ export default function ProfilePage() {
     }
   };
 
+  const updateSessionTimeout = async (sessionIdleTimeoutMinutes) => {
+    try {
+      const val = Number(sessionIdleTimeoutMinutes);
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionIdleTimeoutMinutes: val }),
+      });
+      if (res.ok) {
+        setSettings(prev => ({ ...prev, sessionIdleTimeoutMinutes: val }));
+      }
+    } catch (err) {
+      console.error("Failed to update session timeout:", err);
+    }
+  };
+
   const updateOidcForm = (field, value) => {
     setOidcForm((prev) => ({ ...prev, [field]: value }));
   };
@@ -875,6 +891,28 @@ export default function ProfilePage() {
                 disabled={loading}
               />
             </div>
+            {settings.requireLogin === true && (
+              <div className="flex items-start sm:items-center justify-between gap-4 pt-3 border-t border-border/40">
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-sm sm:text-base">Inactivity auto-logout</p>
+                  <p className="text-xs sm:text-sm text-text-muted">
+                    Automatically sign out the user after period of inactivity.
+                  </p>
+                </div>
+                <select
+                  value={settings.sessionIdleTimeoutMinutes ?? 30}
+                  onChange={(e) => updateSessionTimeout(e.target.value)}
+                  disabled={loading}
+                  className="bg-surface border border-border rounded-lg px-3 py-1.5 text-xs sm:text-sm font-medium focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  <option value={15}>15 minutes</option>
+                  <option value={30}>30 minutes (Default)</option>
+                  <option value={60}>1 hour</option>
+                  <option value={120}>2 hours</option>
+                  <option value={0}>Disabled (Never)</option>
+                </select>
+              </div>
+            )}
             {settings.requireLogin === true && (
               <form onSubmit={handlePasswordChange} className="flex flex-col gap-4 pt-4 border-t border-border/50">
                 {settings.hasPassword && (

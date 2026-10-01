@@ -17,6 +17,10 @@ export default function LoginPage() {
   const [samlConfigured, setSamlConfigured] = useState(false);
   const [samlLoginLabel, setSamlLoginLabel] = useState("Sign in with SAML SSO");
   const [mustChange, setMustChange] = useState(false);
+  const [idleNotice] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return new URLSearchParams(window.location.search).get("reason") === "idle";
+  });
   const [newPassword, setNewPassword] = useState("");
 
   // Countdown for rate-limit
@@ -166,6 +170,15 @@ export default function LoginPage() {
         </div>
 
         <Card>
+          {idleNotice && (
+            <div className="mb-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/25 flex items-start gap-2.5 text-amber-600 dark:text-amber-400">
+              <span className="material-symbols-outlined text-[18px] shrink-0 mt-0.5">schedule</span>
+              <div className="text-xs">
+                <p className="font-semibold mb-0.5">Session Timeout</p>
+                <p>You have been automatically logged out due to inactivity. Please log in again.</p>
+              </div>
+            </div>
+          )}
           {mustChange ? (
             <form onSubmit={handleSetNewPassword} className="flex flex-col gap-4">
               <p className="text-sm text-amber-600 dark:text-amber-400 text-center">

@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useNotificationStore } from "@/store/notificationStore";
 import Sidebar from "../Sidebar";
 import Header from "../Header";
+import { useIdleSessionTimeout } from "@/shared/hooks/useIdleSessionTimeout";
 
 function getToastStyle(type) {
   if (type === "success") {
@@ -33,6 +34,7 @@ function getToastStyle(type) {
 
 export default function DashboardLayout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  useIdleSessionTimeout();
   const pathname = usePathname();
   const notifications = useNotificationStore((state) => state.notifications);
   const removeNotification = useNotificationStore((state) => state.removeNotification);

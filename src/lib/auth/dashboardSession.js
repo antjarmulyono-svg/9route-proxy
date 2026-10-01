@@ -30,21 +30,52 @@ export function shouldUseSecureCookie(request) {
 }
 
 export async function createDashboardAuthToken(claims = {}) {
-  return new SignJWT({ authenticated: true, ...claims })
+  const nowSec = Math.floor(Date.now() / 1000);
+  return new SignJWT({
+    authenticated: true,
+    lastActive: nowSec,
+    ...claims,
+  })
     .setProtectedHeader({ alg: "HS256" })
-    .setIssuedAt()
+    .setIssuedAt(nowSec)
     .setExpirationTime("24h")
     .sign(SECRET);
 }
 
-export async function verifyDashboardAuthToken(token) {
-  if (!token) return false;
+/**
+ * Detailed verification of dashboard auth session.
+ * Checks JWT signature/expiry and optional inactivity/idle limit.
+ *
+ * @param {string} token
+ * @param {{ maxIdleSeconds?: number }} [options]
+ * @returns {Promise<{ valid: boolean, reason?: "invalid"|"expired"|"idle", payload?: object }>}
+ */
+export async function verifyDashboardAuthSession(token, { maxIdleSeconds = 0 } = {}) {
+  if (!token) return { valid: false, reason: "invalid" };
   try {
-    await jwtVerify(token, SECRET);
-    return true;
-  } catch {
-    return false;
+    const { payload } = await jwtVerify(token, SECRET);
+
+    if (maxIdleSeconds > 0 && typeof payload.lastActive === "number") {
+      const nowSec = Math.floor(Date.now() / 1000);
+      const idleTime = nowSec - payload.lastActive;
+      if (idleTime > maxIdleSeconds) {
+        return { valid: false, reason: "idle", payload };
+      }
+    }
+
+    return { valid: true, payload };
+  } catch (err) {
+    const reason = err?.code === "ERR_JWT_EXPIRED" ? "expired" : "invalid";
+    return { valid: false, reason };
   }
+}
+
+/**
+ * Backward-compatible boolean verification.
+ */
+export async function verifyDashboardAuthToken(token, options = {}) {
+  const result = await verifyDashboardAuthSession(token, options);
+  return result.valid === true;
 }
 
 export async function getDashboardAuthSession(token) {
@@ -55,6 +86,19 @@ export async function getDashboardAuthSession(token) {
   } catch {
     return null;
   }
+}
+
+/**
+ * Refreshes the lastActive timestamp of an existing valid token.
+ * Retains all custom claims while stamping a fresh lastActive and iat.
+ */
+export async function refreshDashboardAuthToken(token) {
+  const session = await getDashboardAuthSession(token);
+  if (!session) return null;
+
+  // Strip standard JWT reserved claims and previous lastActive timestamp
+  const { exp, iat, nbf, jti, lastActive, ...customClaims } = session;
+  return createDashboardAuthToken(customClaims);
 }
 
 export async function setDashboardAuthCookie(cookieStore, request, claims = {}) {
