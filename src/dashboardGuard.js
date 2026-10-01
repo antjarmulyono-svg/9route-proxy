@@ -312,7 +312,7 @@ export async function proxy(request) {
     // Verify JWT token & check session idle timeout
     const token = request.cookies.get("auth_token")?.value;
     if (token) {
-      const idleMinutes = settings?.sessionIdleTimeoutMinutes ?? 30;
+      const idleMinutes = settings?.sessionIdleTimeoutMinutes ?? 10;
       const maxIdleSeconds = idleMinutes > 0 ? idleMinutes * 60 : 0;
       const sessionResult = await verifyDashboardAuthSession(token, { maxIdleSeconds });
       if (sessionResult.valid) {

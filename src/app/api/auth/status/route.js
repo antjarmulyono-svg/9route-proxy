@@ -11,7 +11,7 @@ export async function GET() {
     const cookieStore = await cookies();
     const session = await getDashboardAuthSession(cookieStore.get("auth_token")?.value);
     const requireLogin = settings.requireLogin !== false;
-    const sessionIdleTimeoutMinutes = typeof settings.sessionIdleTimeoutMinutes === 'number' ? settings.sessionIdleTimeoutMinutes : 30;
+    const sessionIdleTimeoutMinutes = typeof settings.sessionIdleTimeoutMinutes === 'number' ? settings.sessionIdleTimeoutMinutes : 10;
     const authMode = settings.authMode || "password";
     const ssoType = settings.ssoType || "oidc";
     const oidcName = String(session?.oidcName || "").trim();
@@ -51,7 +51,7 @@ export async function GET() {
   } catch {
     return NextResponse.json({
       requireLogin: true,
-      sessionIdleTimeoutMinutes: 30,
+      sessionIdleTimeoutMinutes: 10,
       authMode: "password",
       ssoType: "oidc",
       oidcConfigured: false,

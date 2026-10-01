@@ -24,7 +24,7 @@ const DEFAULT_SETTINGS = {
     videoInput: { enabled: false, roundRobin: false, models: [] },
   },
   requireLogin: true,
-  sessionIdleTimeoutMinutes: 30,
+  sessionIdleTimeoutMinutes: 10,
   requireApiKey: true,
   tunnelDashboardAccess: true,
   authMode: "password",

@@ -37,7 +37,7 @@ export function useIdleSessionTimeout() {
         if (data.requireLogin === false) return;
         const idleMinutes = typeof data.sessionIdleTimeoutMinutes === "number"
           ? data.sessionIdleTimeoutMinutes
-          : 30;
+          : 10;
 
         if (idleMinutes <= 0) return; // 0 = disabled
 

@@ -900,13 +900,15 @@ export default function ProfilePage() {
                   </p>
                 </div>
                 <select
-                  value={settings.sessionIdleTimeoutMinutes ?? 30}
+                  value={settings.sessionIdleTimeoutMinutes ?? 10}
                   onChange={(e) => updateSessionTimeout(e.target.value)}
                   disabled={loading}
                   className="bg-surface border border-border rounded-lg px-3 py-1.5 text-xs sm:text-sm font-medium focus:outline-none focus:ring-1 focus:ring-primary"
                 >
+                  <option value={5}>5 minutes</option>
+                  <option value={10}>10 minutes (Default)</option>
                   <option value={15}>15 minutes</option>
-                  <option value={30}>30 minutes (Default)</option>
+                  <option value={30}>30 minutes</option>
                   <option value={60}>1 hour</option>
                   <option value={120}>2 hours</option>
                   <option value={0}>Disabled (Never)</option>
