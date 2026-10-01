@@ -284,9 +284,10 @@ export async function proxy(request) {
   if (pathname.startsWith("/dashboard")) {
     let requireLogin = true;
     let tunnelDashboardAccess = true;
+    let settings = null;
 
     try {
-      const settings = await loadSettings();
+      settings = await loadSettings();
       if (settings) {
         requireLogin = settings.requireLogin !== false;
         tunnelDashboardAccess = settings.tunnelDashboardAccess === true;
