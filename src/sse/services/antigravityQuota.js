@@ -5,6 +5,7 @@
  */
 
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
+import { updateProviderConnection } from "@/lib/localDb";
 import { getAntigravityUsage } from "open-sse/services/usage/google.js";
 import * as log from "../utils/logger.js";
 
@@ -103,10 +104,14 @@ export function resetAntigravityCatalogue() {
  * Unknown accounts stay available: the catalogue is only learned after the
  * first quota refresh, and blocking before then would strand every account.
  */
-export function isAntigravityModelAvailable(connectionId, model) {
+export function isAntigravityModelAvailable(connectionId, model, connection = null) {
   if (!model) return true;
   if (notFoundModels.get(connectionId)?.has(model)) return false;
-  const ids = availabilityCache.get(connectionId);
+  let ids = availabilityCache.get(connectionId);
+  if ((!Array.isArray(ids) || ids.length === 0) && Array.isArray(connection?.availableModelIds) && connection.availableModelIds.length > 0) {
+    ids = connection.availableModelIds;
+    availabilityCache.set(connectionId, ids);
+  }
   if (!Array.isArray(ids) || ids.length === 0) return true;
   return ids.includes(model);
 }
@@ -174,6 +179,16 @@ export function recordAntigravityModelNotFound(connectionId, model) {
   set.add(model);
   notFoundModels.set(connectionId, set);
   log.info("AG_CATALOG", `${connectionId.slice(0, 8)} | NOT_FOUND ${model} — excluded from this account`);
+
+  // If this account has a known catalogue, prune the model and persist to DB
+  const currentList = availabilityCache.get(connectionId);
+  if (Array.isArray(currentList) && currentList.includes(model)) {
+    const pruned = currentList.filter((m) => m !== model);
+    availabilityCache.set(connectionId, pruned);
+    Promise.resolve(updateProviderConnection(connectionId, { availableModelIds: pruned })).catch((e) => {
+      log.warn("AG_CATALOG", `${connectionId.slice(0, 8)} | failed to persist pruned catalogue: ${e.message}`);
+    });
+  }
 }
 
 /**
@@ -222,6 +237,10 @@ async function _doRefresh(connectionId, accessToken, providerSpecificData, now) 
 
     if (Array.isArray(usage.availableModelIds) && usage.availableModelIds.length > 0) {
       availabilityCache.set(connectionId, usage.availableModelIds);
+      // Persist to DB so subsequent container starts don't suffer cold 404 delays
+      Promise.resolve(updateProviderConnection(connectionId, { availableModelIds: usage.availableModelIds })).catch((e) => {
+        log.warn("AG_CATALOG", `${connectionId.slice(0, 8)} | failed to persist availableModelIds: ${e.message}`);
+      });
       // Upstream is authoritative: a model it now lists is routable again.
       const denied = notFoundModels.get(connectionId);
       if (denied) {

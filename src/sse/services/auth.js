@@ -96,7 +96,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
       // Antigravity: Google serves a different catalogue per plan, so an
       // account that does not carry this model would answer "no longer
       // available — switch to <other model>" instead of generating.
-      if (isAntigravity && model && !isAntigravityModelAvailable(c.id, model)) {
+      if (isAntigravity && model && !isAntigravityModelAvailable(c.id, model, c)) {
         log.info("AG_CATALOG", `${c.id?.slice(0, 8)} | SKIP ${model} — not in this account's plan catalogue`);
         return false;
       }
