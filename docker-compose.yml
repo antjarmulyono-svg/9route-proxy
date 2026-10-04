@@ -57,5 +57,9 @@ services:
       - PORT=8125
 
 volumes:
+  # Created by an earlier compose project, so it is declared external: compose
+  # attaches to it but never creates or deletes it, and `docker compose down -v`
+  # cannot wipe production data. Fresh host: `docker volume create 9router-data`.
   9router-data:
     name: 9router-data
+    external: true

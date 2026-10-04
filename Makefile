@@ -1,4 +1,4 @@
-.PHONY: help install dev build start docker-up docker-down docker-logs docker-restart docker-build docker-update docker-rebuild docker-run clean \
+.PHONY: help install dev build start docker-up docker-down docker-logs docker-restart docker-build docker-update docker-update-all docker-health docker-rebuild docker-run clean \
 	staging-up staging-down staging-logs staging-restart staging-rebuild staging-ps staging-shell staging-clean
 
 # Default configuration
@@ -47,8 +47,19 @@ docker-logs: ## Pantau log container docker compose
 docker-restart: ## Restart container docker compose
 	docker compose restart
 
-docker-update: ## Rebuild (pakai cache) lalu jalankan — pakai ini setelah mengubah kode
+docker-update: ## Rebuild 9router saja lalu cek health — pakai ini setelah mengubah kode
+	@# --no-deps: deploy kode tidak boleh me-recreate headroom/ag-injector. Recreate
+	@# sidecar memicu bentrok bind port (8787) dengan docker-proxy container lama.
+	docker compose build 9router
+	docker compose up -d --no-deps 9router
+	./scripts/healthcheck-deploy.sh
+
+docker-update-all: ## Rebuild/recreate SELURUH stack (pakai bila sidecar/compose berubah)
 	docker compose up -d --build
+	./scripts/healthcheck-deploy.sh
+
+docker-health: ## Cek health stack produksi (router + headroom + ag-injector)
+	./scripts/healthcheck-deploy.sh
 
 docker-rebuild: ## Rebuild image lokal dari nol (--no-cache) dan jalankan docker compose
 	docker compose down
