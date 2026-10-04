@@ -7,7 +7,7 @@ import {
   extractApiKey,
   isValidApiKey,
 } from "../services/auth.js";
-import { handleAntigravityQuotaError, clearAntigravityStrikes, recordAntigravityModelNotFound } from "../services/antigravityQuota.js";
+import { handleAntigravityQuotaError, clearAntigravityStrikes, recordAntigravityModelNotFound, handleAntigravityModelRefusal } from "../services/antigravityQuota.js";
 import { getSettings } from "@/lib/localDb";
 import { getModelInfo, getComboModels } from "../services/model.js";
 import { handleChatCore } from "open-sse/handlers/chatCore.js";
@@ -333,6 +333,20 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
     });
 
     if (result.success) {
+      // A plan that dropped this model answers 200 with the refusal as assistant
+      // text rather than an HTTP error, so the 404 path never sees it. Record the
+      // exclusion and fall through to the next account instead of handing the
+      // caller a refusal sentence as if it were a completion.
+      if (provider === "antigravity") {
+        const refused = await handleAntigravityModelRefusal(credentials.connectionId, model, result.response);
+        if (refused) {
+          log.warn("FALLBACK", `⇄ ACC:${credentials.connectionName} REFUSED ${model} (plan catalogue) → NEXT ACCOUNT`);
+          excludeConnectionIds.add(credentials.connectionId);
+          lastError = `Account plan does not carry ${model}`;
+          lastStatus = 404;
+          continue;
+        }
+      }
       // Follow the pin to whoever actually served the turn, so the next turn stays here.
       pinConnectionId(provider, sessionKey, credentials.connectionId);
       return result.response;

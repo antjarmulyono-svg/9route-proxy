@@ -90,6 +90,15 @@ export function getAntigravityAvailabilityCache() {
 }
 
 /**
+ * Drop every learned catalogue fact. The 404/refusal exclusions live in their
+ * own map, so clearing the availability cache alone would leave them behind.
+ */
+export function resetAntigravityCatalogue() {
+  availabilityCache.clear();
+  notFoundModels.clear();
+}
+
+/**
  * Whether an account's live catalogue carries the requested model.
  * Unknown accounts stay available: the catalogue is only learned after the
  * first quota refresh, and blocking before then would strand every account.
@@ -100,6 +109,58 @@ export function isAntigravityModelAvailable(connectionId, model) {
   const ids = availabilityCache.get(connectionId);
   if (!Array.isArray(ids) || ids.length === 0) return true;
   return ids.includes(model);
+}
+
+// Observed in production: an account whose plan dropped a model answers
+// HTTP 200 and puts the refusal in the assistant text instead, so the 404
+// path never sees it. Both halves must be present, which keeps a normal
+// completion that merely names a model from being misread as a refusal.
+const MODEL_REFUSAL_PATTERN = /is no longer available\.\s*please switch to/i;
+
+/**
+ * Whether an upstream completion body is really a plan-level model refusal.
+ */
+export function isAntigravityModelRefusal(text) {
+  if (!text || typeof text !== "string") return false;
+  return MODEL_REFUSAL_PATTERN.test(text.trim());
+}
+
+/**
+ * Inspect a successful non-streaming completion for a plan-level model refusal
+ * and record the exclusion when one is found. The response is cloned, so the
+ * caller's body stays readable. Streaming responses are skipped: their body
+ * cannot be consumed here without breaking the stream for the client.
+ *
+ * @returns {Promise<boolean>} true when the body was a refusal
+ */
+export async function handleAntigravityModelRefusal(connectionId, model, response) {
+  if (!connectionId || !model || !response) return false;
+  const contentType = response.headers?.get?.("Content-Type") || "";
+  if (!contentType.includes("application/json")) return false;
+
+  let text;
+  try {
+    text = await response.clone().text();
+  } catch {
+    return false;
+  }
+
+  let content = "";
+  try {
+    const parsed = JSON.parse(text);
+    content =
+      parsed?.choices?.[0]?.message?.content ??
+      parsed?.content?.[0]?.text ??
+      "";
+  } catch {
+    return false;
+  }
+
+  if (typeof content !== "string" || !isAntigravityModelRefusal(content)) return false;
+
+  log.warn("AG_CATALOG", `${connectionId.slice(0, 8)} | REFUSAL ${model} — upstream answered 200 with a plan refusal`);
+  recordAntigravityModelNotFound(connectionId, model);
+  return true;
 }
 
 /**

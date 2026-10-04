@@ -30,6 +30,7 @@ vi.mock("@/sse/utils/logger.js", () => ({ debug: vi.fn(), info: vi.fn(), warn: v
 
 const {
   getAntigravityAvailabilityCache,
+  resetAntigravityCatalogue,
   getAntigravityQuotaCache,
   isAntigravityModelAvailable,
   recordAntigravityModelNotFound,
@@ -43,7 +44,7 @@ function conn(id, email) {
 beforeEach(() => {
   vi.clearAllMocks();
   getAntigravityQuotaCache().clear();
-  getAntigravityAvailabilityCache().clear();
+  resetAntigravityCatalogue();
   mocks.resolveConnectionProxyConfig.mockResolvedValue({});
   mocks.getSettings.mockResolvedValue({});
 });
