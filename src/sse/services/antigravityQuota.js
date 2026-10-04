@@ -10,6 +10,14 @@ import * as log from "../utils/logger.js";
 
 // In-memory cache: connectionId → { [modelId]: { remainingPercentage, resetAt } }
 const quotaCache = new Map();
+// In-memory cache: connectionId → string[] of model ids the account can use.
+// Google splits the catalogue by plan, so two accounts on the same provider no
+// longer serve the same models and routing must respect that per account.
+const availabilityCache = new Map();
+// connectionId → Set<modelId> proven absent by an upstream 404 NOT_FOUND.
+// The availability cache is only learned on quota refresh, so a cold request
+// for a model the plan lacks would otherwise reach upstream on every retry.
+const notFoundModels = new Map();
 // Track last refresh per connection to avoid hammering
 const lastRefreshAt = new Map();
 // In-flight refresh promises — dedup concurrent 409/429 bursts
@@ -75,6 +83,39 @@ export function getAntigravityQuotaCache() {
 }
 
 /**
+ * Get the per-account model availability cache (read-only reference).
+ */
+export function getAntigravityAvailabilityCache() {
+  return availabilityCache;
+}
+
+/**
+ * Whether an account's live catalogue carries the requested model.
+ * Unknown accounts stay available: the catalogue is only learned after the
+ * first quota refresh, and blocking before then would strand every account.
+ */
+export function isAntigravityModelAvailable(connectionId, model) {
+  if (!model) return true;
+  if (notFoundModels.get(connectionId)?.has(model)) return false;
+  const ids = availabilityCache.get(connectionId);
+  if (!Array.isArray(ids) || ids.length === 0) return true;
+  return ids.includes(model);
+}
+
+/**
+ * Record that upstream answered 404 NOT_FOUND for this account+model, so the
+ * auth pre-filter skips the pair instead of paying for the same rejection on
+ * every later request. A quota refresh that lists the model clears it again.
+ */
+export function recordAntigravityModelNotFound(connectionId, model) {
+  if (!connectionId || !model) return;
+  const set = notFoundModels.get(connectionId) || new Set();
+  set.add(model);
+  notFoundModels.set(connectionId, set);
+  log.info("AG_CATALOG", `${connectionId.slice(0, 8)} | NOT_FOUND ${model} — excluded from this account`);
+}
+
+/**
  * Refresh quota for a single antigravity connection from upstream API.
  * Updates in-memory cache only. Cache expiry is the upstream model resetAt.
  * @returns {object|null} quotas map or null on failure
@@ -117,6 +158,16 @@ async function _doRefresh(connectionId, accessToken, providerSpecificData, now) 
     // 401/403 usage responses can contain an empty quotas object plus message.
     // Preserve known cache instead of replacing it with an upstream error response.
     if (!usage?.quotas || usage.message) return null;
+
+    if (Array.isArray(usage.availableModelIds) && usage.availableModelIds.length > 0) {
+      availabilityCache.set(connectionId, usage.availableModelIds);
+      // Upstream is authoritative: a model it now lists is routable again.
+      const denied = notFoundModels.get(connectionId);
+      if (denied) {
+        for (const id of usage.availableModelIds) denied.delete(id);
+        if (denied.size === 0) notFoundModels.delete(connectionId);
+      }
+    }
 
     // Update in-memory cache. Caller logs CACHE_BLOCK only if requested model is exhausted.
     // Strike blocks are re-asserted after every refresh so an optimistic

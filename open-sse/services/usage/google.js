@@ -188,6 +188,11 @@ export async function getAntigravityUsage(accessToken, providerSpecificData, pro
 
     const data = await response.json();
     const quotas = {};
+    // Google splits the Antigravity catalogue by plan: free/trial accounts keep
+    // claude-sonnet-4-6, paid Pro accounts only expose claude-sonnet-5-5-*.
+    // The raw id list travels with the quotas so routing can skip an account
+    // that does not carry the requested model at all.
+    const availableModelIds = Object.keys(data.models || {});
 
     // Parse model quotas (inspired by vscode-antigravity-cockpit)
     if (data.models) {
@@ -208,6 +213,13 @@ export async function getAntigravityUsage(accessToken, providerSpecificData, pro
         'gemini-3.1-pro-low',
         'claude-sonnet-4-6',
         'claude-opus-4-6-thinking',
+        // Paid Pro / Ultra catalogue — served instead of the 4.6 models.
+        'claude-sonnet-5-5-high',
+        'claude-sonnet-5-5-medium',
+        'claude-sonnet-5-5-low',
+        'claude-opus-5-5-high',
+        'claude-opus-5-5-medium',
+        'claude-opus-5-5-low',
         'gpt-oss-120b-medium',
         // Image generation models
         'gemini-3.1-flash-image',
@@ -302,6 +314,7 @@ export async function getAntigravityUsage(accessToken, providerSpecificData, pro
     return {
       plan: subscriptionInfo?.currentTier?.name || "Unknown",
       quotas,
+      availableModelIds,
       subscriptionInfo,
     };
   } catch (error) {

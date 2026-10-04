@@ -3,7 +3,7 @@ import { resolveConnectionProxyConfig, selectProxyPool } from "@/lib/network/con
 import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLockUpdate, getEarliestModelLockUntil } from "open-sse/services/accountFallback.js";
 import { MAX_RATE_LIMIT_COOLDOWN_MS } from "open-sse/config/errorConfig.js";
 import { resolveProviderId, FREE_PROVIDERS } from "@/shared/constants/providers.js";
-import { getAntigravityQuotaCache } from "./antigravityQuota.js";
+import { getAntigravityQuotaCache, isAntigravityModelAvailable } from "./antigravityQuota.js";
 import * as log from "../utils/logger.js";
 
 // Mutex to prevent race conditions during account selection
@@ -93,6 +93,13 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     const availableConnections = connections.filter(c => {
       if (excludeSet.has(c.id)) return false;
       if (isModelLockActive(c, model)) return false;
+      // Antigravity: Google serves a different catalogue per plan, so an
+      // account that does not carry this model would answer "no longer
+      // available — switch to <other model>" instead of generating.
+      if (isAntigravity && model && !isAntigravityModelAvailable(c.id, model)) {
+        log.info("AG_CATALOG", `${c.id?.slice(0, 8)} | SKIP ${model} — not in this account's plan catalogue`);
+        return false;
+      }
       // Antigravity: skip if live quota exhausted for this model
       if (isAntigravity && model && antigravityQuotaCache) {
         const quota = antigravityQuotaCache.get(c.id)?.[model];
