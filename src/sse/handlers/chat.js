@@ -26,6 +26,7 @@ import { getProjectIdForConnection } from "open-sse/services/projectId.js";
 import { trackIncomingRequest } from "@/lib/clients/clientTracker.js";
 import { getClientSessionKey } from "open-sse/utils/sessionManager.js";
 import { getPinnedConnectionId, pinConnectionId } from "../services/accountAffinity.js";
+import { prepareGeminiPromptProfile } from "../services/geminiPromptProfile.js";
 
 /**
  * Handle chat completion request
@@ -289,9 +290,23 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
 
     // Use shared chatCore
     const chatSettings = await getSettings();
+    const sourceFormatOverride = request?.url
+      ? detectFormatByEndpoint(new URL(request.url).pathname, body)
+      : null;
+    const requestBody = { ...body, model: `${provider}/${model}` };
+    const geminiProfileApplied = prepareGeminiPromptProfile({
+      body: requestBody,
+      sourceFormat: sourceFormatOverride,
+      provider,
+      model,
+      settings: chatSettings,
+    });
+    if (geminiProfileApplied) {
+      log.info("GEMINI_PROFILE", `Applied boz-gemini-v1 to ${provider}/${model}`);
+    }
     const providerThinking = (chatSettings.providerThinking || {})[provider] || null;
     const result = await handleChatCore({
-      body: { ...body, model: `${provider}/${model}` },
+      body: requestBody,
       modelInfo: { provider, model },
       credentials: refreshedCredentials,
       log,
@@ -317,7 +332,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       onPxpipeEvent: appendPxpipeEvent,
       providerThinking,
       // Detect source format by endpoint + body
-      sourceFormatOverride: request?.url ? detectFormatByEndpoint(new URL(request.url).pathname, body) : null,
+      sourceFormatOverride,
       onCredentialsRefreshed: async (newCreds) => {
         await updateProviderCredentials(credentials.connectionId, {
           ...newCreds,
