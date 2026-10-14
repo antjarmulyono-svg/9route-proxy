@@ -60,6 +60,7 @@ const DEFAULT_SETTINGS = {
   ponytailEnabled: false,
   ponytailLevel: "full",
   geminiPromptProfileEnabled: false,
+  geminiPromptProfile: "darkcode",
   pxpipeEnabled: false,
   pxpipeAutoInstall: true,
   pxpipeMinChars: 25000,

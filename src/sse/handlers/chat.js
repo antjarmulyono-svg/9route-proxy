@@ -302,7 +302,8 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       settings: chatSettings,
     });
     if (geminiProfileApplied) {
-      log.info("GEMINI_PROFILE", `Applied boz-gemini-v1 to ${provider}/${model}`);
+      const activeProfile = chatSettings?.geminiPromptProfile || "darkcode";
+      log.info("GEMINI_PROFILE", `Applied ${activeProfile}-v1 to ${provider}/${model}`);
     }
     const providerThinking = (chatSettings.providerThinking || {})[provider] || null;
     const result = await handleChatCore({
