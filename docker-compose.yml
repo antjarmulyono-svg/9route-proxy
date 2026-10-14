@@ -35,7 +35,7 @@ services:
       - ag-injector
 
   headroom:
-    image: ghcr.io/chopratejas/headroom:latest
+    image: headroom:no-avx2
     container_name: headroom
     restart: always
     ports:
