@@ -100,6 +100,31 @@ export function resetAntigravityCatalogue() {
 }
 
 /**
+ * Synchronize the in-memory availability cache directly from database
+ * connections, clearing transient notFound exclusions.
+ * Allows instant live catalog sync without restarting the container.
+ *
+ * @param {Array<object>} connections - Provider connections loaded from DB
+ * @returns {{ syncedAccounts: number, totalModels: number }}
+ */
+export function syncAntigravityCatalogueFromDb(connections = []) {
+  resetAntigravityCatalogue();
+  let synced = 0;
+  let totalModels = 0;
+  if (!Array.isArray(connections)) return { syncedAccounts: 0, totalModels: 0 };
+
+  for (const conn of connections) {
+    if (!conn || !conn.id) continue;
+    if (Array.isArray(conn.availableModelIds) && conn.availableModelIds.length > 0) {
+      availabilityCache.set(conn.id, [...conn.availableModelIds]);
+      synced++;
+      totalModels += conn.availableModelIds.length;
+    }
+  }
+  return { syncedAccounts: synced, totalModels };
+}
+
+/**
  * Whether an account's live catalogue carries the requested model.
  * Unknown accounts stay available: the catalogue is only learned after the
  * first quota refresh, and blocking before then would strand every account.
